@@ -1,0 +1,5 @@
+node_modules/
+src/extensions/
+.package.json.original
+.package-merge-report.json
+package-lock.json

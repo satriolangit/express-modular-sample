@@ -1,0 +1,16 @@
+{
+  "name": "base-api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "merge:ext": "node scripts/merge-package.js",
+    "merge:ext:dry": "node scripts/merge-package.js --dry-run",
+    "merge:ext:undo": "node scripts/merge-package.js --rollback",
+    "poc:copy": "node scripts/poc-copy-extensions.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "uuid": "^9.0.0"
+  }
+}

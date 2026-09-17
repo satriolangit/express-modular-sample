@@ -1,53 +1,105 @@
-const users = [
-  { id: 1, name: "Alice", email: "alice@example.com" },
-  { id: 2, name: "Bob", email: "bob@example.com" },
-];
-const roles = [
-  { id: 1, user_id: 1, name: "admin" },
-  { id: 2, user_id: 2, name: "viewer" },
-];
-const products = [
-  { id: 1, name: "Widget", price: 10 },
-  { id: 2, name: "Gadget", price: 20 },
-];
-const policies = [{ id: 1, name: "default", rule: "allow-all" }];
-const auditLogs = [];
+const { Pool } = require("pg");
+const config = require("./config");
+const logger = require("./logger");
+
+let pool = null;
+
+function getPool() {
+  if (pool) return pool;
+
+  pool = new Pool({
+    host: config.pg.host,
+    port: config.pg.port,
+    user: config.pg.user,
+    password: config.pg.password,
+    database: config.pg.database,
+    max: config.pg.poolMax,
+    idleTimeoutMillis: config.pg.idleTimeoutMs,
+    connectionTimeoutMillis: config.pg.connectionTimeoutMs,
+  });
+
+  pool.on("connect", () => {
+    logger.debug("[pg] client connected");
+  });
+
+  pool.on("acquire", () => {
+    logger.debug("[pg] client acquired");
+  });
+
+  pool.on("remove", () => {
+    logger.debug("[pg] client removed");
+  });
+
+  pool.on("error", (err) => {
+    // idle client error — pool recovers, jangan crash
+    logger.error("[pg] idle client error", { error: err.message });
+  });
+
+  return pool;
+}
+
+/**
+ * Convenience wrapper: query with logging + error enrichment.
+ * Usage: const { rows, rowCount } = await query('SELECT ...', [args])
+ */
+async function query(sql, params = []) {
+  const start = Date.now();
+  try {
+    const result = await getPool().query(sql, params);
+    logger.debug("[pg] query", {
+      durationMs: Date.now() - start,
+      rowCount: result.rowCount,
+    });
+    return result;
+  } catch (err) {
+    logger.error("[pg] query error", {
+      error: err.message,
+      durationMs: Date.now() - start,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Transaction helper.
+ * Usage:
+ *   await tx(async (client) => {
+ *     await client.query('INSERT ...');
+ *     await client.query('UPDATE ...');
+ *   });
+ */
+async function tx(fn) {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function healthCheck() {
+  const { rows } = await getPool().query("SELECT 1 AS ok");
+  return rows[0]?.ok === 1;
+}
+
+async function close() {
+  if (pool) {
+    logger.info("[pg] closing pool");
+    await pool.end();
+    pool = null;
+  }
+}
 
 module.exports = {
-  async query(sql, params = []) {
-    if (/FROM users/i.test(sql) && /WHERE id/i.test(sql)) {
-      return users.filter((u) => u.id === params[0]);
-    }
-    if (/FROM users/i.test(sql)) return users;
-    if (/FROM roles/i.test(sql) && /user_id/i.test(sql)) {
-      return roles.filter((r) => r.user_id === params[0]);
-    }
-    if (/FROM roles/i.test(sql)) return roles;
-    if (/FROM products/i.test(sql) && /WHERE id/i.test(sql)) {
-      return products.filter((p) => p.id === params[0]);
-    }
-    if (/FROM products/i.test(sql)) return products;
-    if (/FROM policies/i.test(sql) && /WHERE id/i.test(sql)) {
-      return policies.filter((p) => p.id === params[0]);
-    }
-    if (/FROM policies/i.test(sql)) return policies;
-    if (/FROM audit_logs/i.test(sql) && /user_id/i.test(sql)) {
-      return auditLogs.filter((a) => a.user_id === params[0]);
-    }
-    if (/FROM audit_logs/i.test(sql)) return auditLogs;
-    return [];
-  },
-
-  async insert(table, row) {
-    if (table === "audit_logs") {
-      const newRow = {
-        id: auditLogs.length + 1,
-        ...row,
-        created_at: new Date().toISOString(),
-      };
-      auditLogs.push(newRow);
-      return newRow;
-    }
-    throw new Error(`Unknown table: ${table}`);
-  },
+  getPool,
+  query,
+  tx,
+  healthCheck,
+  close,
 };

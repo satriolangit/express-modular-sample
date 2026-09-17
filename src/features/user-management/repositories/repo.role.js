@@ -2,9 +2,14 @@ const { db } = require("../../../libs/deps");
 
 module.exports = {
   async findByUserId(userId) {
-    return db.query("SELECT * FROM roles WHERE user_id = ?", [userId]);
+    return db.query(
+      `select * 
+from app_user_role aur  left join app_role ar on aur.role_id = ar.id
+where aur.user_id = ?`,
+      [userId],
+    );
   },
   async findAll() {
-    return db.query("SELECT * FROM roles");
+    return db.query("select * from app_role;");
   },
 };

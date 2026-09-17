@@ -12,8 +12,6 @@ function listDirs(dir) {
   });
 }
 
-// "route.product.js"         -> { name: 'product', isExtend: false }
-// "route.product.extend.js"  -> { name: 'product', isExtend: true  }
 function parseRouteFile(filename) {
   const m = filename.match(/^route\.(.+?)(\.extend)?\.js$/);
   if (!m) return null;
@@ -45,7 +43,7 @@ function discover(featuresDir, extensionsDir) {
 
   const features = new Map();
 
-  for (const name of names) {
+  for (const name of [...names].sort()) {
     const basePath = path.join(featuresDir, name);
     const extPath = path.join(extensionsDir, name);
 
@@ -54,14 +52,10 @@ function discover(featuresDir, extensionsDir) {
 
     const collected = {};
 
-    // Base: features/{name}/routes/route.X.js
     if (baseExists) {
       collectRoutesFromDir(path.join(basePath, "routes"), collected);
     }
 
-    // Extension:
-    //   - flat:    extensions/{name}/route.X.extend.js
-    //   - routes/: extensions/{name}/routes/route.X.js  (untuk new feature)
     if (extExists) {
       collectRoutesFromDir(extPath, collected);
       collectRoutesFromDir(path.join(extPath, "routes"), collected);
@@ -75,7 +69,7 @@ function discover(featuresDir, extensionsDir) {
         : null,
     }));
 
-    // Resolve index (prefix)
+    // ── Resolve index (prefix + init hook) ─────────────
     let index = null;
     const baseIndex = path.join(basePath, "index.js");
     const extIndex = path.join(extPath, "index.js");
@@ -86,13 +80,23 @@ function discover(featuresDir, extensionsDir) {
       index = require(extIndex);
     }
 
+    // ── Resolve extension init hook ────────────────────
+    let extInit = null;
+    if (extExists) {
+      const extInitPath = path.join(extPath, "init.extend.js");
+      if (fs.existsSync(extInitPath)) {
+        extInit = require(extInitPath);
+      }
+    }
+
     features.set(name, {
       name,
+      index,
+      extInit,
       prefix: index?.prefix ?? `/${name}`,
       routeGroups,
     });
   }
-
   return features;
 }
 

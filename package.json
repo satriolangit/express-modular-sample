@@ -6,14 +6,15 @@
     "start": "node index.js",
     "merge:ext": "node scripts/merge-package.js",
     "merge:ext:dry": "node scripts/merge-package.js --dry-run",
-    "merge:ext:undo": "node scripts/merge-package.js --rollback",
-    "poc:copy": "node scripts/poc-copy-extensions.js"
+    "poc:copy": "node scripts/copy-extensions.js"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^4.19.2",
+    "nats": "^2.28.2",
     "pg": "^8.11.5",
     "winston": "^3.13.0",
-    "nats": "^2.28.2",
-    "ws": "^8.17.0"
+    "ws": "^8.17.0",
+    "uuid": "^9.0.0"
   }
 }

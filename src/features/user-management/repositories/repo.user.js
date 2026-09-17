@@ -6,6 +6,7 @@ module.exports = {
     return row ?? null;
   },
   async findAll() {
-    return db.query("SELECT * FROM app_user");
+    const query = await db.query("SELECT * FROM app_user");
+    return query.rows;
   },
 };

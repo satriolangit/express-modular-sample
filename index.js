@@ -26,8 +26,12 @@ async function main() {
   try {
     await nats.init();
   } catch (err) {
-    logger.error("nats connect failed", { error: err.message });
+    logger.error("nats required but unavailable", { error: err.message });
     process.exit(1);
+  }
+
+  if (!nats.isAvailable()) {
+    logger.warn("continuing without NATS — some features may be degraded");
   }
 
   // ────────────────────────────────────────────────

@@ -5,7 +5,6 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
 const BASE_PKG = path.join(ROOT, "package.json");
 const EXT_PKG = path.join(ROOT, "src", "extensions", "package.json");
-const BACKUP = path.join(ROOT, ".package.json.original");
 
 const STRATEGY = process.env.MERGE_STRATEGY || "extension-wins";
 const DRY = process.argv.includes("--dry-run");
@@ -30,25 +29,15 @@ function major(v) {
   return m ? Number(m[1]) : null;
 }
 
-if (ROLLBACK) {
-  if (!fs.existsSync(BACKUP)) {
-    console.error("No backup to rollback");
-    process.exit(1);
-  }
-  fs.copyFileSync(BACKUP, BASE_PKG);
-  fs.unlinkSync(BACKUP);
-  console.log("✓ Rolled back package.json");
-  process.exit(0);
+if (!fs.existsSync(BASE_PKG)) {
+  console.error(`✗ Missing ${path.relative(ROOT, BASE_PKG)}`);
+  process.exit(1);
 }
 
 if (!fs.existsSync(EXT_PKG)) {
-  console.log("ℹ No extension package.json, skip");
+  fs.copyFileSync(BASE_PKG, OUT_PKG);
+  console.log("package.json generated (no extension)");
   process.exit(0);
-}
-
-if (!DRY) {
-  if (fs.existsSync(BACKUP)) fs.copyFileSync(BACKUP, BASE_PKG);
-  else fs.copyFileSync(BASE_PKG, BACKUP);
 }
 
 const basePkg = readJson(BASE_PKG);
@@ -117,7 +106,7 @@ console.log(
 );
 
 for (const r of conflicts) {
-  const flag = r.action.endsWith("MAJOR") ? "  ⚠️  MAJOR" : "";
+  const flag = r.action.endsWith("MAJOR") ? " MAJOR" : "";
   console.log(
     `  ${r.section}.${r.name}: base=${r.base} ext=${r.ext} → ${r.action}${flag}`,
   );
@@ -135,6 +124,6 @@ for (const l of ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]) {
   const p = path.join(ROOT, l);
   if (fs.existsSync(p)) {
     fs.unlinkSync(p);
-    console.log(`✓ Removed ${l}`);
+    console.log(`Removed ${l}`);
   }
 }

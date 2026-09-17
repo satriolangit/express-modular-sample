@@ -1,0 +1,19 @@
+{
+  "name": "base-api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "merge:ext": "node scripts/merge-package.js",
+    "merge:ext:dry": "node scripts/merge-package.js --dry-run",
+    "poc:copy": "node scripts/copy-extensions.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2",
+    "nats": "^2.28.2",
+    "pg": "^8.11.5",
+    "winston": "^3.13.0",
+    "ws": "^8.17.0"
+  }
+}

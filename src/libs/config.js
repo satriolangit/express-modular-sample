@@ -20,8 +20,8 @@ module.exports = {
   nats: {
     servers: process.env.NATS_SERVERS || "nats://localhost:4222",
     name: process.env.NATS_NAME || "base-api",
-    // disable JetStream kalau tidak dipakai
     jetstream: process.env.NATS_JETSTREAM !== "false",
+    required: process.env.NATS_REQUIRED === "true",
   },
 
   ws: {

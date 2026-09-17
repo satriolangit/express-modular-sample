@@ -2,108 +2,132 @@ const { connect, StringCodec } = require("nats");
 const config = require("./config");
 const logger = require("./logger");
 
-let ctx = null; // { nc, js, jsm, sc }
+let ctx = null; // { nc, js, jsm, sc } atau null
+let lastError = null; // Error terakhir kalau init gagal
 
 async function init() {
   if (ctx) return ctx;
 
   logger.info("[nats] connecting", { servers: config.nats.servers });
 
-  const nc = await connect({
-    servers: config.nats.servers,
-    name: config.nats.name,
-    maxReconnectAttempts: -1, // reconnect selamanya
-    reconnectTimeWait: 2_000,
-    reconnectJitter: 100,
-    pingInterval: 20_000,
-    maxPingOut: 3,
-  });
+  try {
+    const nc = await connect({
+      servers: config.nats.servers,
+      name: config.nats.name,
+      maxReconnectAttempts: -1,
+      reconnectTimeWait: 2_000,
+      reconnectJitter: 100,
+      pingInterval: 20_000,
+      maxPingOut: 3,
+      // timeout connect supaya tidak hang lama saat server down
+      timeout: 5_000,
+    });
 
-  // ── Status monitor ─────────────────────────────────
-  (async () => {
-    for await (const s of nc.status()) {
-      switch (s.type) {
-        case "disconnect":
-          logger.warn("[nats] disconnected", { server: s.data });
-          break;
-        case "reconnect":
-          logger.info("[nats] reconnected", { server: s.data });
-          break;
-        case "update":
-          logger.debug("[nats] server update", { server: s.data });
-          break;
-        case "error":
-          logger.error("[nats] status error", { error: String(s.data) });
-          break;
-        default:
-          logger.debug("[nats] status", { type: s.type });
+    // ── Status monitor ─────────────────────────────
+    (async () => {
+      for await (const s of nc.status()) {
+        switch (s.type) {
+          case "disconnect":
+            logger.warn("[nats] disconnected", { server: s.data });
+            break;
+          case "reconnect":
+            logger.info("[nats] reconnected", { server: s.data });
+            break;
+          case "error":
+            logger.error("[nats] status error", { error: String(s.data) });
+            break;
+          default:
+            logger.debug("[nats] status", { type: s.type });
+        }
       }
-    }
-  })().catch((err) =>
-    logger.error("[nats] status loop error", { error: err.message }),
-  );
+    })().catch((err) =>
+      logger.error("[nats] status loop error", { error: err.message }),
+    );
 
-  // ── Closed handler ─────────────────────────────────
-  (async () => {
-    for await (const _ of nc.closed()) {
-      logger.warn("[nats] connection closed");
+    // ── JetStream (opsional) ───────────────────────
+    let js = null;
+    let jsm = null;
+    if (config.nats.jetstream) {
+      jsm = await nc.jetstreamManager();
+      js = nc.jetstream();
     }
-  })().catch((err) =>
-    logger.error("[nats] closed loop error", { error: err.message }),
-  );
 
-  // ── JetStream ──────────────────────────────────────
-  let js = null;
-  let jsm = null;
-  if (config.nats.jetstream) {
-    jsm = await nc.jetstreamManager();
-    js = nc.jetstream();
+    ctx = { nc, js, jsm, sc: StringCodec() };
+    lastError = null;
+    logger.info("[nats] connected");
+    return ctx;
+  } catch (err) {
+    lastError = err;
+    ctx = null;
+
+    if (config.nats.required) {
+      logger.error("[nats] connect failed (required)", { error: err.message });
+      throw err;
+    }
+
+    logger.warn("[nats] connect failed — running in degraded mode", {
+      error: err.message,
+      servers: config.nats.servers,
+      hint: "Set NATS_REQUIRED=true to fail-fast on NATS unavailability",
+    });
+    return null;
   }
+}
 
-  ctx = {
-    nc,
-    js,
-    jsm,
-    sc: StringCodec(),
-  };
-
-  logger.info("[nats] connected");
-  return ctx;
+function isAvailable() {
+  return ctx !== null && !ctx.nc.isClosed();
 }
 
 function get() {
-  if (!ctx) throw new Error("nats not initialized");
+  if (!ctx) throw new Error("nats not available");
   return ctx;
 }
 
-/**
- * Convenience: publish JSON to a subject (core NATS, fire-and-forget).
- */
+// function lastError() {
+//   return lastError;
+// }
+
+// ── Publish helpers (safe — no-op if unavailable) ───
 function publish(subject, payload) {
-  const { nc, sc } = get();
-  nc.publish(subject, sc.encode(JSON.stringify(payload)));
+  if (!isAvailable()) {
+    logger.debug("[nats] publish skipped (unavailable)", { subject });
+    return false;
+  }
+  const { nc, sc } = ctx;
+  try {
+    nc.publish(subject, sc.encode(JSON.stringify(payload)));
+    return true;
+  } catch (err) {
+    logger.error("[nats] publish failed", { subject, error: err.message });
+    return false;
+  }
 }
 
-/**
- * Convenience: publish JSON to a JetStream subject (durable, at-least-once).
- */
 async function jsPublish(subject, payload) {
-  const { js, sc } = get();
-  return js.publish(subject, sc.encode(JSON.stringify(payload)));
+  if (!isAvailable() || !ctx.js) {
+    logger.debug("[nats] jsPublish skipped (unavailable)", { subject });
+    return null;
+  }
+  try {
+    const { js, sc } = ctx;
+    return await js.publish(subject, sc.encode(JSON.stringify(payload)));
+  } catch (err) {
+    logger.error("[nats] jsPublish failed", { subject, error: err.message });
+    return null;
+  }
 }
 
-/**
- * Convenience: subscribe with JSON decoding.
- * Returns an async iterator.
- *
- *   const sub = nats.subscribeJson('user.created');
- *   for await (const msg of sub) {
- *     console.log(msg.data);          // parsed object
- *     msg.raw;                        // raw NATS msg
- *   }
- */
 function subscribeJson(subject, opts = {}) {
-  const { nc, sc } = get();
+  if (!isAvailable()) {
+    logger.warn("[nats] subscribe skipped (unavailable)", { subject });
+    return {
+      async *[Symbol.asyncIterator]() {
+        /* never yields */
+      },
+      unsubscribe() {},
+    };
+  }
+  const { nc, sc } = ctx;
   const sub = nc.subscribe(subject, opts);
 
   return {
@@ -125,25 +149,16 @@ function subscribeJson(subject, opts = {}) {
   };
 }
 
-/**
- * Convenience: durable JetStream consumer.
- *
- *   const consumer = await nats.consume('STREAM', 'durable-name');
- *   const messages = await consumer.consume();
- *   for await (const m of messages) {
- *     const data = JSON.parse(sc.decode(m.data));
- *     m.ack();  // or m.nak() / m.term()
- *   }
- */
 async function consume(streamName, durableName, opts = {}) {
-  const { jsm, js } = get();
-  const consumer = await js.consumers.get(streamName, durableName);
-  return consumer;
+  if (!isAvailable() || !ctx.js) {
+    throw new Error("nats JetStream not available");
+  }
+  const { js } = ctx;
+  return js.consumers.get(streamName, durableName);
 }
 
-async function healthCheck() {
-  if (!ctx) return false;
-  return !ctx.nc.isClosed();
+function healthCheck() {
+  return isAvailable();
 }
 
 async function close() {
@@ -164,6 +179,8 @@ async function close() {
 module.exports = {
   init,
   get,
+  isAvailable,
+  lastError,
   publish,
   jsPublish,
   subscribeJson,

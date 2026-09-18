@@ -85,6 +85,11 @@ async function main() {
   ws.init(httpServer);
 
   // ────────────────────────────────────────────────
+  // SCHEDULER (sync — tasks registered later)
+  // ────────────────────────────────────────────────
+  const scheduler = require("./src/libs/scheduler");
+
+  // ────────────────────────────────────────────────
   // POPULATE DEPS
   // ────────────────────────────────────────────────
   const deps = require("./src/libs/deps");
@@ -94,10 +99,32 @@ async function main() {
     db,
     nats,
     ws,
+    scheduler,
     http: httpServer,
   });
 
   logger.info("deps populated");
+
+  nats.onLost((err) => {
+    logger.warn("NATS connection lost — application in degraded mode", {
+      error: err.message,
+      impact: "NATS publish/subscribe disabled until app restart",
+    });
+    // optional: metrics, alerting, health probe marking
+  });
+
+  // ────────────────────────────────────────────────
+  // REGISTER GLOBAL SCHEDULED TASKS
+  // ────────────────────────────────────────────────
+  scheduler.register({
+    name: "global:health-check",
+    schedule: "*/5 * * * *", // every 5 minutes
+    owner: "app",
+    handler: async () => {
+      const ok = await db.healthCheck();
+      if (!ok) logger.warn("[global] DB health check failed");
+    },
+  });
 
   // ────────────────────────────────────────────────
   // DISCOVER FEATURES
@@ -130,7 +157,7 @@ async function main() {
       }
     }
 
-    // extension init (kalau ada)
+    // extension init
     if (typeof feature.extInit === "function") {
       logger.info(`init extension: ${feature.name}`);
       try {
@@ -144,6 +171,11 @@ async function main() {
       }
     }
   }
+
+  // ────────────────────────────────────────────────
+  // START SCHEDULED TASKS
+  // ────────────────────────────────────────────────
+  scheduler.startAll();
 
   // ────────────────────────────────────────────────
   // MOUNT ROUTES
@@ -183,7 +215,23 @@ async function main() {
   // ────────────────────────────────────────────────
   // GRACEFUL SHUTDOWN
   // ────────────────────────────────────────────────
-  setupShutdown({ httpServer, db, nats, ws, logger });
+  setupShutdown({ httpServer, db, nats, ws, logger, scheduler });
+
+  // Nats log
+  nats.onLost((err) => {
+    logger.warn("NATS connection lost — degraded mode", {
+      error: err.message,
+      impact: "NATS publish/subscribe disabled until reconnect",
+    });
+  });
+
+  nats.onConnected(() => {
+    logger.info("NATS connection ready");
+  });
+
+  nats.onReconnected(() => {
+    logger.info("NATS reconnected via background retry");
+  });
 
   // ────────────────────────────────────────────────
   // LISTEN
@@ -194,7 +242,7 @@ async function main() {
   });
 }
 
-function setupShutdown({ httpServer, db, nats, ws, logger }) {
+function setupShutdown({ httpServer, db, nats, ws, logger, scheduler }) {
   let shuttingDown = false;
 
   const shutdown = async (signal) => {
@@ -209,7 +257,7 @@ function setupShutdown({ httpServer, db, nats, ws, logger }) {
     }, 15_000);
     forceTimer.unref();
 
-    // ── 1. HTTP: stop new connections, wait for in-flight ──
+    // HTTP: stop new connections, wait for in-flight ──
     await new Promise((resolve) => {
       httpServer.close((err) => {
         if (err) logger.warn("http close error", { error: err.message });
@@ -218,7 +266,15 @@ function setupShutdown({ httpServer, db, nats, ws, logger }) {
     });
     logger.info("http closed");
 
-    // ── 2. WebSocket: close all clients ──
+    // -- Scheduler: stop new runs, wait in-flight  ← NEW
+    try {
+      await scheduler.stopAll({ waitMs: 10_000 });
+      scheduler.destroyAll();
+    } catch (err) {
+      logger.error("scheduler close error", { error: err.message });
+    }
+
+    // ── WebSocket: close all clients ──
     try {
       await ws.close();
       logger.info("ws closed");
@@ -226,7 +282,7 @@ function setupShutdown({ httpServer, db, nats, ws, logger }) {
       logger.error("ws close error", { error: err.message });
     }
 
-    // ── 3. NATS: drain pending publish + unsubscribe ──
+    // ── NATS: drain pending publish + unsubscribe ──
     try {
       await nats.close();
       logger.info("nats closed");
@@ -234,7 +290,7 @@ function setupShutdown({ httpServer, db, nats, ws, logger }) {
       logger.error("nats close error", { error: err.message });
     }
 
-    // ── 4. Postgres: end pool ──
+    // ── Postgres: end pool ──
     try {
       await db.close();
       logger.info("pg closed");

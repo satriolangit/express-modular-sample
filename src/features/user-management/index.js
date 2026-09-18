@@ -2,48 +2,66 @@ module.exports = {
   prefix: "/users",
 
   async init(deps) {
-    const { nats, ws, logger } = deps;
+    const { nats, ws, logger, scheduler } = deps;
 
     logger.info("[user-management] init");
 
-    // ── NATS core subscribe (fire-and-forget) ──────
-    const sub = nats.subscribeJson("user.created");
-    (async () => {
-      for await (const { data } of sub) {
-        logger.info("[user-management] event: user.created", data);
+    // ── Setup function: idempotent, dipanggil berulang ──
+    function setupNatsSubscriptions() {
+      if (!nats.isAvailable()) {
+        logger.warn("[user-management] NATS not available — skip setup");
+        return;
       }
-    })().catch((err) =>
-      logger.error("[user-management] sub error", { error: err.message }),
-    );
 
-    // ── JetStream durable consumer ─────────────────
-    try {
-      const consumer = await nats.consume("USERS", "user-management-worker");
-      const messages = await consumer.consume();
+      logger.info("[user-management] setting up NATS subscriptions");
 
+      // ── Core NATS ────────────────────────────────────
+      const createdSub = nats.subscribeJson("user.created");
       (async () => {
-        for await (const m of messages) {
-          try {
-            const data = JSON.parse(nats.get().sc.decode(m.data));
-            logger.info("[user-management] js: message", data);
-            // do work here...
-            m.ack();
-          } catch (err) {
-            logger.error("[user-management] js handler error", {
-              error: err.message,
-            });
-            m.nak();
-          }
+        for await (const { data } of createdSub) {
+          logger.info("[user-management] user.created", data);
         }
       })().catch((err) =>
-        logger.error("[user-management] consumer error", {
+        logger.debug("[user-management] sub ended", {
           error: err.message,
         }),
       );
-    } catch (err) {
-      logger.warn("[user-management] JetStream consumer not available", {
-        error: err.message,
-      });
+
+      // ── JetStream consumer ──────────────────────────
+      (async () => {
+        try {
+          const consumer = await nats.consume(
+            "USERS",
+            "user-management-worker",
+          );
+          const messages = await consumer.consume();
+
+          for await (const m of messages) {
+            try {
+              const data = JSON.parse(nats.get().sc.decode(m.data));
+              logger.info("[user-management] js", data);
+              m.ack();
+            } catch (err) {
+              logger.error("[user-management] js handler", {
+                error: err.message,
+              });
+              m.nak();
+            }
+          }
+        } catch (err) {
+          logger.warn("[user-management] JS consumer setup failed", {
+            error: err.message,
+          });
+        }
+      })();
+    }
+
+    // ── Register callback — fire setiap connect sukses ──
+    nats.onConnected(setupNatsSubscriptions);
+
+    // ── Handle case: sudah connected saat init ──────────
+    if (nats.isAvailable()) {
+      setupNatsSubscriptions();
     }
 
     // ── WebSocket handler ──────────────────────────
@@ -76,5 +94,15 @@ module.exports = {
       },
       { owner: "user-management" },
     );
+
+    // --- feature level scheduler register ---
+    scheduler.register({
+      name: "user-management:sample scheduler task",
+      schedule: "0 * * * *", // hourly
+      owner: "user-management",
+      handler: () => {
+        logger.info("[user-management] user-management:sample scheduler task");
+      },
+    });
   },
 };

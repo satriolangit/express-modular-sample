@@ -22,11 +22,26 @@ module.exports = {
     name: process.env.NATS_NAME || "base-api",
     jetstream: process.env.NATS_JETSTREAM !== "false",
     required: process.env.NATS_REQUIRED === "true",
+
+    // ── Reconnect ───────────────────────────────────────
+    maxReconnectAttempts: Number(process.env.NATS_MAX_RECONNECT ?? 5),
+    reconnectTimeWaitMs: Number(process.env.NATS_RECONNECT_WAIT_MS ?? 2_000),
+
+    // ── Background retry after exhaust ──────────────────
+    autoRetryAfterExhaust: process.env.NATS_AUTO_RETRY_AFTER_EXHAUST === "true",
+    retryAfterExhaustIntervalMs: Number(
+      process.env.NATS_RETRY_AFTER_EXHAUST_MS ?? 30_000,
+    ),
   },
 
   ws: {
     heartbeatMs: Number(process.env.WS_HEARTBEAT_MS) || 30_000,
     maxPayload: Number(process.env.WS_MAX_PAYLOAD) || 1_048_576, // 1 MB
+  },
+
+  scheduler: {
+    enabled: process.env.SCHEDULER_ENABLED !== "false",
+    timezone: process.env.SCHEDULER_TZ || "UTC",
   },
 
   logLevel: process.env.LOG_LEVEL || "info",

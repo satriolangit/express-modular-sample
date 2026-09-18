@@ -4,3 +4,8 @@ src/extensions/
 .package-merge-report.json
 package-lock.json
 package.json
+.claude/
+.gitnexus/
+.CLAUDE.md
+.AGENTS.md
+.docs/

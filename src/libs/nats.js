@@ -2,99 +2,267 @@ const { connect, StringCodec } = require("nats");
 const config = require("./config");
 const logger = require("./logger");
 
-let ctx = null; // { nc, js, jsm, sc } atau null
-let lastError = null; // Error terakhir kalau init gagal
+// ─────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────
+let ctx = null; // { nc, js, jsm, sc } | null
+let lastError = null;
+let intentionalClose = false;
+let backgroundTimer = null;
 
-async function init() {
-  if (ctx) return ctx;
+// Callbacks
+const lostHandlers = []; // dipanggil saat connection lost permanen
+const reconnectedHandlers = []; // dipanggil saat background retry sukses
+const connectedHandlers = []; // dipanggil setiap kali connect sukses (initial + reconnect)
 
-  logger.info("[nats] connecting", { servers: config.nats.servers });
+// ─────────────────────────────────────────────────────
+// Callback registry
+// ─────────────────────────────────────────────────────
+function onLost(handler) {
+  if (typeof handler === "function") lostHandlers.push(handler);
+}
+
+function onReconnected(handler) {
+  if (typeof handler === "function") reconnectedHandlers.push(handler);
+}
+
+function onConnected(handler) {
+  if (typeof handler === "function") connectedHandlers.push(handler);
+}
+
+function fire(handlers, ...args) {
+  for (const h of handlers) {
+    try {
+      h(...args);
+    } catch (err) {
+      logger.error("[nats] callback threw", { error: err.message });
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────
+// Cleanup
+// ─────────────────────────────────────────────────────
+async function cleanupContext() {
+  if (!ctx) return;
+  const c = ctx;
+  ctx = null;
 
   try {
-    const nc = await connect({
-      servers: config.nats.servers,
-      name: config.nats.name,
-      maxReconnectAttempts: -1,
-      reconnectTimeWait: 2_000,
-      reconnectJitter: 100,
-      pingInterval: 20_000,
-      maxPingOut: 3,
-      // timeout connect supaya tidak hang lama saat server down
-      timeout: 5_000,
-    });
+    if (c.nc && !c.nc.isClosed()) {
+      await c.nc.close();
+    }
+  } catch (err) {
+    logger.debug("[nats] cleanup close error", { error: err.message });
+  }
+  logger.debug("[nats] context cleaned up");
+}
 
-    // ── Status monitor ─────────────────────────────
-    (async () => {
-      for await (const s of nc.status()) {
-        switch (s.type) {
-          case "disconnect":
-            logger.warn("[nats] disconnected", { server: s.data });
-            break;
-          case "reconnect":
-            logger.info("[nats] reconnected", { server: s.data });
-            break;
-          case "error":
-            logger.error("[nats] status error", { error: String(s.data) });
-            break;
-          default:
-            logger.debug("[nats] status", { type: s.type });
-        }
-      }
-    })().catch((err) =>
-      logger.error("[nats] status loop error", { error: err.message }),
-    );
+// ─────────────────────────────────────────────────────
+// Background retry
+// ─────────────────────────────────────────────────────
+function startBackgroundRetry() {
+  if (backgroundTimer) return;
 
-    // ── JetStream (opsional) ───────────────────────
-    let js = null;
-    let jsm = null;
-    if (config.nats.jetstream) {
-      jsm = await nc.jetstreamManager();
-      js = nc.jetstream();
+  const intervalMs = config.nats.retryAfterExhaustIntervalMs;
+  logger.warn("[nats] starting background retry", { intervalMs });
+
+  backgroundTimer = setInterval(async () => {
+    if (ctx) {
+      clearInterval(backgroundTimer);
+      backgroundTimer = null;
+      return;
     }
 
-    ctx = { nc, js, jsm, sc: StringCodec() };
-    lastError = null;
-    logger.info("[nats] connected");
-    return ctx;
+    logger.debug("[nats] background retry attempt...");
+
+    try {
+      const result = await init({ isBackgroundRetry: true });
+      if (result) {
+        logger.info("[nats] background retry succeeded");
+        fire(reconnectedHandlers, result);
+        clearInterval(backgroundTimer);
+        backgroundTimer = null;
+      }
+    } catch (err) {
+      logger.debug("[nats] background retry failed", { error: err.message });
+    }
+  }, intervalMs);
+
+  backgroundTimer.unref();
+}
+
+function stopBackgroundRetry() {
+  if (backgroundTimer) {
+    clearInterval(backgroundTimer);
+    backgroundTimer = null;
+    logger.debug("[nats] background retry stopped");
+  }
+}
+
+// ─────────────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────────────
+async function init({ isBackgroundRetry = false } = {}) {
+  if (ctx) return ctx;
+
+  if (isBackgroundRetry) {
+    // reset flag supaya close monitor bekerja normal lagi
+    intentionalClose = false;
+  } else {
+    intentionalClose = false;
+    logger.info("[nats] connecting", {
+      servers: config.nats.servers,
+      maxReconnectAttempts: config.nats.maxReconnectAttempts,
+    });
+  }
+
+  let nc;
+  try {
+    nc = await connect({
+      servers: config.nats.servers,
+      name: config.nats.name,
+
+      maxReconnectAttempts: config.nats.maxReconnectAttempts,
+      reconnectTimeWait: config.nats.reconnectTimeWaitMs,
+      reconnectJitter: 100,
+      reconnectJitterTLS: 1_000,
+      pingInterval: 20_000,
+      maxPingOut: 3,
+      timeout: 5_000,
+    });
   } catch (err) {
     lastError = err;
-    ctx = null;
 
     if (config.nats.required) {
       logger.error("[nats] connect failed (required)", { error: err.message });
       throw err;
     }
 
-    logger.warn("[nats] connect failed — running in degraded mode", {
-      error: err.message,
-      servers: config.nats.servers,
-      hint: "Set NATS_REQUIRED=true to fail-fast on NATS unavailability",
-    });
+    if (!isBackgroundRetry) {
+      logger.warn("[nats] initial connect failed — degraded mode", {
+        error: err.message,
+        servers: config.nats.servers,
+      });
+
+      if (config.nats.autoRetryAfterExhaust) {
+        startBackgroundRetry();
+      }
+    }
+
     return null;
   }
+
+  // ── Status monitor ─────────────────────────────────
+  (async () => {
+    for await (const s of nc.status()) {
+      switch (s.type) {
+        case "disconnect":
+          logger.warn("[nats] disconnected", {
+            server: s.data,
+            willRetry: config.nats.maxReconnectAttempts !== 0,
+          });
+          break;
+        case "reconnect":
+          logger.info("[nats] reconnected (inline)", { server: s.data });
+          break;
+        case "error":
+          logger.error("[nats] status error", { error: String(s.data) });
+          break;
+        case "ldm":
+          logger.warn("[nats] lame duck mode", { server: s.data });
+          break;
+        default:
+          logger.debug("[nats] status", { type: s.type });
+      }
+    }
+  })().catch((err) =>
+    logger.debug("[nats] status loop ended", { error: err.message }),
+  );
+
+  // ── Permanent close monitor ────────────────────────
+  (async () => {
+    for await (const _ of nc.closed()) {
+      if (intentionalClose) {
+        logger.info("[nats] connection closed (intentional)");
+        return;
+      }
+
+      const err = new Error(
+        `NATS connection lost after ${config.nats.maxReconnectAttempts} reconnect attempts`,
+      );
+
+      logger.error("[nats] connection lost permanently", {
+        maxReconnectAttempts: config.nats.maxReconnectAttempts,
+        servers: config.nats.servers,
+        hint: "NATS client will shut down. Application continues in degraded mode.",
+      });
+
+      await cleanupContext();
+      lastError = err;
+
+      // Notify feature code (non-fatal)
+      fire(lostHandlers, err);
+
+      // Start background retry
+      if (config.nats.autoRetryAfterExhaust) {
+        startBackgroundRetry();
+      } else {
+        logger.warn("[nats] NATS client shut down — restart app to reconnect");
+      }
+    }
+  })().catch((err) =>
+    logger.debug("[nats] closed loop ended", { error: err.message }),
+  );
+
+  // ── JetStream ──────────────────────────────────────
+  let js = null;
+  let jsm = null;
+  if (config.nats.jetstream) {
+    jsm = await nc.jetstreamManager();
+    js = nc.jetstream();
+  }
+
+  ctx = { nc, js, jsm, sc: StringCodec() };
+  lastError = null;
+
+  logger.info("[nats] connected");
+
+  // Notify feature code (untuk re-subscribe saat reconnect)
+  if (isBackgroundRetry) {
+    logger.info("[nats] notifying features to re-subscribe");
+    fire(connectedHandlers, ctx);
+  } else {
+    // Initial connect juga fire — supaya feature bisa register di sini
+    fire(connectedHandlers, ctx);
+  }
+
+  return ctx;
+}
+
+// ─────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────
+function get() {
+  if (!ctx) throw new Error("nats not available");
+  return ctx;
 }
 
 function isAvailable() {
   return ctx !== null && !ctx.nc.isClosed();
 }
 
-function get() {
-  if (!ctx) throw new Error("nats not available");
-  return ctx;
+function lastErrorFn() {
+  return lastError;
 }
 
-// function lastError() {
-//   return lastError;
-// }
-
-// ── Publish helpers (safe — no-op if unavailable) ───
 function publish(subject, payload) {
   if (!isAvailable()) {
     logger.debug("[nats] publish skipped (unavailable)", { subject });
     return false;
   }
-  const { nc, sc } = ctx;
   try {
+    const { nc, sc } = ctx;
     nc.publish(subject, sc.encode(JSON.stringify(payload)));
     return true;
   } catch (err) {
@@ -121,9 +289,7 @@ function subscribeJson(subject, opts = {}) {
   if (!isAvailable()) {
     logger.warn("[nats] subscribe skipped (unavailable)", { subject });
     return {
-      async *[Symbol.asyncIterator]() {
-        /* never yields */
-      },
+      async *[Symbol.asyncIterator]() {},
       unsubscribe() {},
     };
   }
@@ -149,12 +315,11 @@ function subscribeJson(subject, opts = {}) {
   };
 }
 
-async function consume(streamName, durableName, opts = {}) {
+async function consume(streamName, durableName) {
   if (!isAvailable() || !ctx.js) {
     throw new Error("nats JetStream not available");
   }
-  const { js } = ctx;
-  return js.consumers.get(streamName, durableName);
+  return ctx.js.consumers.get(streamName, durableName);
 }
 
 function healthCheck() {
@@ -162,7 +327,14 @@ function healthCheck() {
 }
 
 async function close() {
-  if (!ctx) return;
+  intentionalClose = true;
+  stopBackgroundRetry();
+
+  if (!ctx) {
+    logger.info("[nats] close called — already unavailable");
+    return;
+  }
+
   logger.info("[nats] draining");
   try {
     await ctx.nc.drain();
@@ -178,9 +350,12 @@ async function close() {
 
 module.exports = {
   init,
+  onLost,
+  onReconnected, // ← NEW
+  onConnected, // ← NEW
   get,
   isAvailable,
-  lastError,
+  lastError: lastErrorFn,
   publish,
   jsPublish,
   subscribeJson,

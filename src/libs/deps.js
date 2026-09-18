@@ -14,5 +14,6 @@ module.exports = {
   db: null, // object       — src/libs/db.js (getPool, query, tx, ...)
   nats: null, // object       — src/libs/nats.js (init, get, publish, ...)
   ws: null, // object       — src/libs/ws.js (init, register, broadcast, ...)
+  scheduler: null, // object       — src/libs/scheduler.js
   http: null, // http.Server  — untuk shutdown / attach tambahan
 };

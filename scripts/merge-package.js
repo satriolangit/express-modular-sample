@@ -1,129 +1,289 @@
 #!/usr/bin/env node
+/**
+ * Generate package.json from package.base.json + extension package.json.
+ *
+ * Source of truth: package.base.json  (edit this, commit this)
+ * Generated file:  package.json       (gitignored, do not edit manually)
+ *
+ * Usage:
+ *   node scripts/merge-package.js             # generate package.json
+ *   node scripts/merge-package.js --dry-run   # preview only, no writes
+ *
+ * Env:
+ *   MERGE_STRATEGY=extension-wins | base-wins | strict
+ *                  (default: extension-wins)
+ */
+
+"use strict";
+
 const fs = require("fs");
 const path = require("path");
 
+// ─────────────────────────────────────────────────────
+// Paths
+// ─────────────────────────────────────────────────────
 const ROOT = path.resolve(__dirname, "..");
-const BASE_PKG = path.join(ROOT, "package.json");
+const SRC_PKG = path.join(ROOT, "package.base.json");
+const OUT_PKG = path.join(ROOT, "package.json");
 const EXT_PKG = path.join(ROOT, "src", "extensions", "package.json");
+const REPORT = path.join(ROOT, ".package-merge-report.json");
+const LOCK_PATHS = [
+  path.join(ROOT, "package-lock.json"),
+  path.join(ROOT, "yarn.lock"),
+  path.join(ROOT, "pnpm-lock.yaml"),
+];
 
+// ─────────────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────────────
 const STRATEGY = process.env.MERGE_STRATEGY || "extension-wins";
-const DRY = process.argv.includes("--dry-run");
-const ROLLBACK = process.argv.includes("--rollback");
+const DRY_RUN = process.argv.includes("--dry-run");
 
-const SECTIONS = [
+const MERGEABLE_SECTIONS = [
   "dependencies",
   "devDependencies",
   "peerDependencies",
   "optionalDependencies",
   "overrides",
+  "resolutions",
 ];
 
-const readJson = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
-const writeJson = (p, o) =>
-  fs.writeFileSync(p, JSON.stringify(o, null, 2) + "\n");
+const VALID_STRATEGIES = ["extension-wins", "base-wins", "strict"];
 
-function major(v) {
-  const m = String(v)
+// ─────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────
+function log(...args) {
+  console.log("[merge-package]", ...args);
+}
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function writeJson(file, obj) {
+  fs.writeFileSync(file, JSON.stringify(obj, null, 2) + "\n", "utf8");
+}
+
+function majorVersion(range) {
+  const m = String(range)
     .replace(/^[^\d]*/, "")
     .match(/^(\d+)/);
   return m ? Number(m[1]) : null;
 }
 
-if (!fs.existsSync(BASE_PKG)) {
-  console.error(`✗ Missing ${path.relative(ROOT, BASE_PKG)}`);
-  process.exit(1);
+function sortedEntries(obj) {
+  return Object.entries(obj || {}).sort(([a], [b]) => a.localeCompare(b));
 }
 
-if (!fs.existsSync(EXT_PKG)) {
-  fs.copyFileSync(BASE_PKG, OUT_PKG);
-  console.log("package.json generated (no extension)");
-  process.exit(0);
+function removeStaleLocks() {
+  for (const lock of LOCK_PATHS) {
+    if (fs.existsSync(lock)) {
+      fs.unlinkSync(lock);
+      log(`✓ Removed stale lock: ${path.basename(lock)}`);
+    }
+  }
 }
 
-const basePkg = readJson(BASE_PKG);
-const extPkg = readJson(EXT_PKG);
-const merged = { ...basePkg };
-const report = [];
+// ─────────────────────────────────────────────────────
+// Merge
+// ─────────────────────────────────────────────────────
+function mergeSection(baseDeps, extDeps, sectionName, report) {
+  const merged = { ...baseDeps };
 
-for (const section of SECTIONS) {
-  const baseDeps = basePkg[section] || {};
-  const extDeps = extPkg[section] || {};
-  const out = { ...baseDeps };
-
-  for (const [name, extVer] of Object.entries(extDeps)) {
+  for (const [name, extVer] of sortedEntries(extDeps)) {
     const baseVer = baseDeps[name];
 
+    // Not in base → add
     if (baseVer === undefined) {
-      out[name] = extVer;
-      report.push({ section, name, action: "added", to: extVer });
-    } else if (baseVer === extVer) {
-      report.push({ section, name, action: "same", v: baseVer });
-    } else {
-      const majorMismatch = major(baseVer) !== major(extVer);
+      merged[name] = extVer;
+      report.push({ section: sectionName, name, action: "added", to: extVer });
+      continue;
+    }
 
-      if (STRATEGY === "strict") {
-        throw new Error(
-          `Conflict: ${section}.${name} base=${baseVer} ext=${extVer}`,
-        );
-      }
-      if (STRATEGY === "base-wins") {
-        report.push({
-          section,
-          name,
-          action: "kept-base",
-          base: baseVer,
-          ext: extVer,
-        });
-      } else {
-        out[name] = extVer;
-        report.push({
-          section,
-          name,
-          action: majorMismatch ? "ext-wins-MAJOR" : "ext-wins",
-          base: baseVer,
-          ext: extVer,
-        });
-      }
+    // Identical → skip
+    if (baseVer === extVer) {
+      report.push({
+        section: sectionName,
+        name,
+        action: "same",
+        version: baseVer,
+      });
+      continue;
+    }
+
+    // Conflict
+    const baseMajor = majorVersion(baseVer);
+    const extMajor = majorVersion(extVer);
+    const majorMismatch =
+      baseMajor !== null && extMajor !== null && baseMajor !== extMajor;
+
+    if (STRATEGY === "strict") {
+      throw new Error(
+        `Conflict in ${sectionName}: ${name} (base=${baseVer}, ext=${extVer})`,
+      );
+    }
+
+    if (STRATEGY === "base-wins") {
+      report.push({
+        section: sectionName,
+        name,
+        action: majorMismatch
+          ? "conflict-base-wins-MAJOR"
+          : "conflict-base-wins",
+        base: baseVer,
+        ext: extVer,
+        kept: baseVer,
+      });
+      continue;
+    }
+
+    // extension-wins (default)
+    merged[name] = extVer;
+    report.push({
+      section: sectionName,
+      name,
+      action: majorMismatch ? "conflict-ext-wins-MAJOR" : "conflict-ext-wins",
+      base: baseVer,
+      ext: extVer,
+      kept: extVer,
+    });
+  }
+
+  return merged;
+}
+
+// ─────────────────────────────────────────────────────
+// Main
+// ─────────────────────────────────────────────────────
+function main() {
+  // ── Validate ─────────────────────────────────────
+  if (!VALID_STRATEGIES.includes(STRATEGY)) {
+    log(`✗ Invalid MERGE_STRATEGY: "${STRATEGY}"`);
+    log(`  Must be one of: ${VALID_STRATEGIES.join(" | ")}`);
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(SRC_PKG)) {
+    log(`✗ Source not found: ${path.relative(ROOT, SRC_PKG)}`);
+    log(`  Create "package.base.json" as the source of truth.`);
+    process.exit(1);
+  }
+
+  log(`Strategy: ${STRATEGY}${DRY_RUN ? " (dry-run)" : ""}`);
+  log(`Source:   ${path.relative(ROOT, SRC_PKG)}`);
+  log(`Output:   ${path.relative(ROOT, OUT_PKG)}`);
+
+  // ── Load source ──────────────────────────────────
+  const basePkg = readJson(SRC_PKG);
+
+  // ── No extension → straight copy ─────────────────
+  if (!fs.existsSync(EXT_PKG)) {
+    log(`ℹ No extension package.json — copying source as-is`);
+
+    if (DRY_RUN) {
+      log("Dry-run: no files changed");
+      return;
+    }
+
+    writeJson(OUT_PKG, basePkg);
+    log(`✓ package.json generated`);
+    removeStaleLocks();
+    return;
+  }
+
+  // ── Merge with extension ─────────────────────────
+  const extPkg = readJson(EXT_PKG);
+  log(`Ext:      ${path.relative(ROOT, EXT_PKG)}`);
+
+  const merged = { ...basePkg };
+  const report = [];
+
+  for (const section of MERGEABLE_SECTIONS) {
+    const result = mergeSection(
+      basePkg[section] || {},
+      extPkg[section] || {},
+      section,
+      report,
+    );
+    if (Object.keys(result).length > 0) {
+      merged[section] = result;
     }
   }
 
-  if (Object.keys(out).length) merged[section] = out;
-}
+  // ── Summary ──────────────────────────────────────
+  const summary = {
+    total: report.length,
+    added: report.filter((r) => r.action === "added").length,
+    same: report.filter((r) => r.action === "same").length,
+    conflicts: report.filter((r) => r.action.startsWith("conflict")).length,
+    majorConflicts: report.filter((r) => r.action.endsWith("MAJOR")).length,
+  };
 
-const conflicts = report.filter(
-  (r) =>
-    r.action === "ext-wins" ||
-    r.action === "ext-wins-MAJOR" ||
-    r.action === "kept-base",
-);
-
-console.log(`Strategy: ${STRATEGY}${DRY ? " (dry-run)" : ""}`);
-console.log(
-  `Changes: +${report.filter((r) => r.action === "added").length} ` +
-    `=${report.filter((r) => r.action === "same").length} ` +
-    `!${conflicts.length} ` +
-    `(MAJOR: ${report.filter((r) => r.action.endsWith("MAJOR")).length})`,
-);
-
-for (const r of conflicts) {
-  const flag = r.action.endsWith("MAJOR") ? " MAJOR" : "";
-  console.log(
-    `  ${r.section}.${r.name}: base=${r.base} ext=${r.ext} → ${r.action}${flag}`,
+  log(
+    `Changes: +${summary.added} added, ` +
+      `=${summary.same} same, ` +
+      `!${summary.conflicts} conflicts ` +
+      `(${summary.majorConflicts} MAJOR)`,
   );
-}
 
-if (DRY) {
-  console.log("Dry-run: no files changed");
-  process.exit(0);
-}
-
-writeJson(BASE_PKG, merged);
-console.log("✓ package.json merged");
-
-for (const l of ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]) {
-  const p = path.join(ROOT, l);
-  if (fs.existsSync(p)) {
-    fs.unlinkSync(p);
-    console.log(`Removed ${l}`);
+  // ── Print conflicts ──────────────────────────────
+  if (summary.conflicts > 0) {
+    console.log("");
+    log("Conflicts detail:");
+    for (const r of report.filter((r) => r.action.startsWith("conflict"))) {
+      const flag = r.action.endsWith("MAJOR") ? "  ⚠️  MAJOR MISMATCH" : "";
+      console.log(
+        `  ${r.section}.${r.name}: ` +
+          `base=${r.base} ext=${r.ext} → kept=${r.kept}${flag}`,
+      );
+    }
+    console.log("");
   }
+
+  if (DRY_RUN) {
+    log("Dry-run: no files changed");
+    return;
+  }
+
+  // ── Write output ─────────────────────────────────
+  writeJson(OUT_PKG, merged);
+  log(`✓ package.json generated`);
+
+  // ── Write report ─────────────────────────────────
+  writeJson(REPORT, {
+    generatedAt: new Date().toISOString(),
+    strategy: STRATEGY,
+    source: path.relative(ROOT, SRC_PKG),
+    output: path.relative(ROOT, OUT_PKG),
+    summary,
+    changes: report,
+  });
+  log(`✓ Report → ${path.relative(ROOT, REPORT)}`);
+
+  // ── Cleanup locks ────────────────────────────────
+  removeStaleLocks();
+
+  // ── Warnings ─────────────────────────────────────
+  if (summary.majorConflicts > 0 && STRATEGY === "extension-wins") {
+    log("");
+    log("⚠️  Major version mismatch detected.");
+    log("   Extension wins, but base may break.");
+    log("   Consider:");
+    log(
+      "   - Adding `overrides` in extension package.json to pin transitive deps",
+    );
+    log("   - Updating base to a compatible version");
+    log("   - Setting MERGE_STRATEGY=strict to fail-fast in CI");
+  }
+}
+
+// ─────────────────────────────────────────────────────
+// Run
+// ─────────────────────────────────────────────────────
+try {
+  main();
+} catch (err) {
+  console.error("[merge-package] ✗", err.message);
+  process.exit(1);
 }

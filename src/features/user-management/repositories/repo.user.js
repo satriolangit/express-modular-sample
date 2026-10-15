@@ -2,11 +2,13 @@ import { db } from "../../../libs/deps.js";
 
 export default {
   async findById(id) {
-    const [row] = await db.query("SELECT * FROM app_user WHERE id = ?", [id]);
-    return row ?? null;
+    const { rows } = await db.query("SELECT * FROM app_user WHERE id = $1", [
+      id,
+    ]);
+    return rows[0] ?? null;
   },
   async findAll() {
-    const query = await db.query("SELECT * FROM app_user");
-    return query.rows;
+    const { rows } = await db.query("SELECT * FROM app_user");
+    return rows;
   },
 };

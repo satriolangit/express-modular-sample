@@ -1,10 +1,12 @@
-const { Pool } = require("pg");
-const config = require("./config");
-const logger = require("./logger");
+import pg from "pg";
+import config from "./config.js";
+import logger from "./logger.js";
+
+const { Pool } = pg;
 
 let pool = null;
 
-function getPool() {
+export function getPool() {
   if (pool) return pool;
 
   pool = new Pool({
@@ -42,7 +44,7 @@ function getPool() {
  * Convenience wrapper: query with logging + error enrichment.
  * Usage: const { rows, rowCount } = await query('SELECT ...', [args])
  */
-async function query(sql, params = []) {
+export async function query(sql, params = []) {
   const start = Date.now();
   try {
     const result = await getPool().query(sql, params);
@@ -68,7 +70,7 @@ async function query(sql, params = []) {
  *     await client.query('UPDATE ...');
  *   });
  */
-async function tx(fn) {
+export async function tx(fn) {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -83,23 +85,15 @@ async function tx(fn) {
   }
 }
 
-async function healthCheck() {
+export async function healthCheck() {
   const { rows } = await getPool().query("SELECT 1 AS ok");
   return rows[0]?.ok === 1;
 }
 
-async function close() {
+export async function close() {
   if (pool) {
     logger.info("[pg] closing pool");
     await pool.end();
     pool = null;
   }
 }
-
-module.exports = {
-  getPool,
-  query,
-  tx,
-  healthCheck,
-  close,
-};

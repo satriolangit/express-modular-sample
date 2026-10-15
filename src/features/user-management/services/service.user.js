@@ -1,6 +1,5 @@
-const userRepo = require("../repositories/repo.user");
-const roleRepo = require("../repositories/repo.role");
-const { logger } = require("../../../libs/deps");
+import userRepo from "../repositories/repo.user.js";
+import { logger } from "../../../libs/deps.js";
 
 async function getUser(id) {
   logger.debug("service.user.getUser", id);
@@ -13,4 +12,4 @@ async function listUsers() {
   return userRepo.findAll();
 }
 
-module.exports = { getUser, listUsers };
+export default { getUser, listUsers };

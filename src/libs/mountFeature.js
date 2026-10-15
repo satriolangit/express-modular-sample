@@ -1,8 +1,8 @@
-const express = require("express");
-const { createRouter } = require("./routeCollector");
-const { mergeRoutes } = require("./mergeRoutes");
+import express from "express";
+import { createRouter } from "./routeCollector.js";
+import { mergeRoutes } from "./mergeRoutes.js";
 
-function mountFeature(app, { name, prefix, routeGroups }) {
+export function mountFeature(app, { name, prefix, routeGroups }) {
   const finalRouter = express.Router();
   let totalRoutes = 0;
 
@@ -40,5 +40,3 @@ function mountFeature(app, { name, prefix, routeGroups }) {
   app.use(prefix, finalRouter);
   console.log(`  ✓ ${totalRoutes} routes mounted\n`);
 }
-
-module.exports = { mountFeature };

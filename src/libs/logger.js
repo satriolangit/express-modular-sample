@@ -1,5 +1,5 @@
-const winston = require("winston");
-const config = require("./config");
+import winston from "winston";
+import config from "./config.js";
 
 const { combine, timestamp, errors, json, colorize, printf } = winston.format;
 
@@ -39,4 +39,4 @@ logger.child = function (meta) {
   });
 };
 
-module.exports = logger;
+export default logger;

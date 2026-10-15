@@ -14,15 +14,13 @@
  *                  (default: extension-wins)
  */
 
-"use strict";
-
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 // ─────────────────────────────────────────────────────
 // Paths
 // ─────────────────────────────────────────────────────
-const ROOT = path.resolve(__dirname, "..");
+const ROOT = path.resolve(import.meta.dirname, "..");
 const SRC_PKG = path.join(ROOT, "package.base.json");
 const OUT_PKG = path.join(ROOT, "package.json");
 const EXT_PKG = path.join(ROOT, "src", "extensions", "package.json");

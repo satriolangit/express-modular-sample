@@ -38,7 +38,7 @@ function applyExtend(base, ext) {
   };
 }
 
-function mergeRoutes(layers) {
+export function mergeRoutes(layers) {
   const registry = new Map();
 
   for (const rt of layers.base ?? []) {
@@ -64,5 +64,3 @@ function mergeRoutes(layers) {
 
   return [...registry.values()];
 }
-
-module.exports = { mergeRoutes };

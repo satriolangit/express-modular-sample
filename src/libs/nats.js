@@ -1,6 +1,8 @@
-const { connect, StringCodec } = require("nats");
-const config = require("./config");
-const logger = require("./logger");
+import natsLib from "nats";
+import config from "./config.js";
+import logger from "./logger.js";
+
+const { connect, StringCodec } = natsLib;
 
 // ─────────────────────────────────────────────────────
 // State
@@ -18,15 +20,15 @@ const connectedHandlers = []; // dipanggil setiap kali connect sukses (initial +
 // ─────────────────────────────────────────────────────
 // Callback registry
 // ─────────────────────────────────────────────────────
-function onLost(handler) {
+export function onLost(handler) {
   if (typeof handler === "function") lostHandlers.push(handler);
 }
 
-function onReconnected(handler) {
+export function onReconnected(handler) {
   if (typeof handler === "function") reconnectedHandlers.push(handler);
 }
 
-function onConnected(handler) {
+export function onConnected(handler) {
   if (typeof handler === "function") connectedHandlers.push(handler);
 }
 
@@ -103,7 +105,7 @@ function stopBackgroundRetry() {
 // ─────────────────────────────────────────────────────
 // Init
 // ─────────────────────────────────────────────────────
-async function init({ isBackgroundRetry = false } = {}) {
+export async function init({ isBackgroundRetry = false } = {}) {
   if (ctx) return ctx;
 
   if (isBackgroundRetry) {
@@ -243,12 +245,12 @@ async function init({ isBackgroundRetry = false } = {}) {
 // ─────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────
-function get() {
+export function get() {
   if (!ctx) throw new Error("nats not available");
   return ctx;
 }
 
-function isAvailable() {
+export function isAvailable() {
   return ctx !== null && !ctx.nc.isClosed();
 }
 
@@ -256,7 +258,7 @@ function lastErrorFn() {
   return lastError;
 }
 
-function publish(subject, payload) {
+export function publish(subject, payload) {
   if (!isAvailable()) {
     logger.debug("[nats] publish skipped (unavailable)", { subject });
     return false;
@@ -271,7 +273,7 @@ function publish(subject, payload) {
   }
 }
 
-async function jsPublish(subject, payload) {
+export async function jsPublish(subject, payload) {
   if (!isAvailable() || !ctx.js) {
     logger.debug("[nats] jsPublish skipped (unavailable)", { subject });
     return null;
@@ -285,7 +287,7 @@ async function jsPublish(subject, payload) {
   }
 }
 
-function subscribeJson(subject, opts = {}) {
+export function subscribeJson(subject, opts = {}) {
   if (!isAvailable()) {
     logger.warn("[nats] subscribe skipped (unavailable)", { subject });
     return {
@@ -315,18 +317,18 @@ function subscribeJson(subject, opts = {}) {
   };
 }
 
-async function consume(streamName, durableName) {
+export async function consume(streamName, durableName) {
   if (!isAvailable() || !ctx.js) {
     throw new Error("nats JetStream not available");
   }
   return ctx.js.consumers.get(streamName, durableName);
 }
 
-function healthCheck() {
+export function healthCheck() {
   return isAvailable();
 }
 
-async function close() {
+export async function close() {
   intentionalClose = true;
   stopBackgroundRetry();
 
@@ -348,18 +350,4 @@ async function close() {
   logger.info("[nats] closed");
 }
 
-module.exports = {
-  init,
-  onLost,
-  onReconnected, // ← NEW
-  onConnected, // ← NEW
-  get,
-  isAvailable,
-  lastError: lastErrorFn,
-  publish,
-  jsPublish,
-  subscribeJson,
-  consume,
-  healthCheck,
-  close,
-};
+export { lastErrorFn as lastError };

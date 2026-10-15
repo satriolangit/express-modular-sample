@@ -1,7 +1,7 @@
-const roleService = require("../services/service.role");
+import roleService from "../services/service.role.js";
 
-module.exports = function registerRole(r) {
+export default function registerRole(r) {
   r.get("/roles", async (req, res) => {
     res.json(await roleService.listRoles());
   });
-};
+}

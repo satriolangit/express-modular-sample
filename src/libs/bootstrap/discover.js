@@ -1,5 +1,6 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 function listDirs(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -18,7 +19,12 @@ function parseRouteFile(filename) {
   return { name: m[1], isExtend: !!m[2] };
 }
 
-function collectRoutesFromDir(dir, collected) {
+async function importModule(filePath) {
+  const mod = await import(pathToFileURL(filePath).href);
+  return mod.default;
+}
+
+async function collectRoutesFromDir(dir, collected) {
   if (!fs.existsSync(dir)) return;
 
   for (const file of fs.readdirSync(dir)) {
@@ -27,18 +33,18 @@ function collectRoutesFromDir(dir, collected) {
     const parsed = parseRouteFile(file);
     if (!parsed) continue;
 
-    const mod = require(path.join(dir, file));
+    const register = await importModule(path.join(dir, file));
     const group = (collected[parsed.name] ??= { base: null, extends: [] });
 
     if (parsed.isExtend) {
-      group.extends.push(mod);
+      group.extends.push(register);
     } else {
-      group.base = mod;
+      group.base = register;
     }
   }
 }
 
-function discover(featuresDir, extensionsDir) {
+export async function discover(featuresDir, extensionsDir) {
   const names = new Set([...listDirs(featuresDir), ...listDirs(extensionsDir)]);
 
   const features = new Map();
@@ -53,12 +59,12 @@ function discover(featuresDir, extensionsDir) {
     const collected = {};
 
     if (baseExists) {
-      collectRoutesFromDir(path.join(basePath, "routes"), collected);
+      await collectRoutesFromDir(path.join(basePath, "routes"), collected);
     }
 
     if (extExists) {
-      collectRoutesFromDir(extPath, collected);
-      collectRoutesFromDir(path.join(extPath, "routes"), collected);
+      await collectRoutesFromDir(extPath, collected);
+      await collectRoutesFromDir(path.join(extPath, "routes"), collected);
     }
 
     const routeGroups = Object.entries(collected).map(([groupName, g]) => ({
@@ -75,9 +81,9 @@ function discover(featuresDir, extensionsDir) {
     const extIndex = path.join(extPath, "index.js");
 
     if (baseExists && fs.existsSync(baseIndex)) {
-      index = require(baseIndex);
+      index = await importModule(baseIndex);
     } else if (extExists && fs.existsSync(extIndex)) {
-      index = require(extIndex);
+      index = await importModule(extIndex);
     }
 
     // ── Resolve extension init hook ────────────────────
@@ -85,7 +91,7 @@ function discover(featuresDir, extensionsDir) {
     if (extExists) {
       const extInitPath = path.join(extPath, "init.extend.js");
       if (fs.existsSync(extInitPath)) {
-        extInit = require(extInitPath);
+        extInit = await importModule(extInitPath);
       }
     }
 
@@ -99,5 +105,3 @@ function discover(featuresDir, extensionsDir) {
   }
   return features;
 }
-
-module.exports = { discover };

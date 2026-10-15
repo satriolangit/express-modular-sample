@@ -1,1 +1,1 @@
-module.exports = { prefix: "/products" };
+export default { prefix: "/products" };

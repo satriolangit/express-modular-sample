@@ -1,6 +1,6 @@
-const policyService = require("../services/service.policy");
+import policyService from "../services/service.policy.js";
 
-module.exports = function registerPolicy(r) {
+export default function registerPolicy(r) {
   r.get("/policies", async (req, res) => {
     res.json(await policyService.list());
   });
@@ -12,4 +12,4 @@ module.exports = function registerPolicy(r) {
       res.status(404).json({ error: e.message });
     }
   });
-};
+}

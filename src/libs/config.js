@@ -1,4 +1,4 @@
-module.exports = {
+const config = {
   appName: "base-api",
   env: process.env.NODE_ENV || "development",
 
@@ -49,3 +49,5 @@ module.exports = {
   // another env variable
   apiKey: process.env.API_KEY || "poc-secret-key",
 };
+
+export default config;

@@ -1,4 +1,4 @@
-const productRepo = require("../repositories/repo.product");
+import productRepo from "../repositories/repo.product.js";
 
 async function get(id) {
   const p = await productRepo.findById(Number(id));
@@ -10,4 +10,4 @@ async function list() {
   return productRepo.findAll();
 }
 
-module.exports = { get, list };
+export default { get, list };

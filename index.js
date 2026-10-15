@@ -12,7 +12,7 @@ import * as ws from "./src/libs/ws.js";
 import * as scheduler from "./src/libs/scheduler.js";
 import { populate } from "./src/libs/deps.js";
 import { discover } from "./src/libs/bootstrap/discover.js";
-import { mountFeature } from "./src/libs/mountFeature.js";
+import { mountModule } from "./src/libs/mountModule.js";
 
 async function main() {
   // ────────────────────────────────────────────────
@@ -34,7 +34,7 @@ async function main() {
   }
 
   if (!nats.isAvailable()) {
-    logger.warn("continuing without NATS — some features may be degraded");
+    logger.warn("continuing without NATS — some modules may be degraded");
   }
 
   // ────────────────────────────────────────────────
@@ -115,26 +115,26 @@ async function main() {
   });
 
   // ────────────────────────────────────────────────
-  // DISCOVER FEATURES
+  // DISCOVER MODULES
   // ────────────────────────────────────────────────
-  const features = await discover(
-    path.join(import.meta.dirname, "src", "features"),
+  const modules = await discover(
+    path.join(import.meta.dirname, "src", "modules"),
     path.join(import.meta.dirname, "src", "extensions"),
   );
 
-  logger.info(`discovered ${features.size} feature(s)`);
+  logger.info(`discovered ${modules.size} module(s)`);
 
   // ────────────────────────────────────────────────
   // INIT HOOK (subscribe NATS, register WS)
   // ────────────────────────────────────────────────
-  for (const feature of features.values()) {
-    // feature init
-    if (typeof feature.index?.init === "function") {
-      logger.info(`init feature: ${feature.name}`);
+  for (const mod of modules.values()) {
+    // module init
+    if (typeof mod.index?.init === "function") {
+      logger.info(`init module: ${mod.name}`);
       try {
-        await feature.index.init(deps);
+        await mod.index.init(deps);
       } catch (err) {
-        logger.error(`init failed: ${feature.name}`, {
+        logger.error(`module init failed: ${mod.name}`, {
           error: err.message,
           stack: err.stack,
         });
@@ -143,12 +143,12 @@ async function main() {
     }
 
     // extension init
-    if (typeof feature.extInit === "function") {
-      logger.info(`init extension: ${feature.name}`);
+    if (typeof mod.extInit === "function") {
+      logger.info(`init extension: ${mod.name}`);
       try {
-        await feature.extInit(deps);
+        await mod.extInit(deps);
       } catch (err) {
-        logger.error(`extension init failed: ${feature.name}`, {
+        logger.error(`extension init failed: ${mod.name}`, {
           error: err.message,
           stack: err.stack,
         });
@@ -165,8 +165,8 @@ async function main() {
   // ────────────────────────────────────────────────
   // MOUNT ROUTES
   // ────────────────────────────────────────────────
-  for (const feature of features.values()) {
-    mountFeature(app, feature);
+  for (const mod of modules.values()) {
+    mountModule(app, mod);
   }
 
   // ────────────────────────────────────────────────

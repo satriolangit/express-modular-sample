@@ -60,7 +60,7 @@ test("base + extension routes respond correctly", async () => {
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { id: 1, title: "Policy 1" });
 
-    // ── audit (extension-only feature) ──────────────
+    // ── audit (extension-only module) ───────────────
     res = await fetch(`${base}/audit/logs`);
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), [

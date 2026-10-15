@@ -2,11 +2,11 @@ import express from "express";
 import { createRouter } from "./routeCollector.js";
 import { mergeRoutes } from "./mergeRoutes.js";
 
-export function mountFeature(app, { name, prefix, routeGroups }) {
+export function mountModule(app, { name, prefix, routeGroups }) {
   const finalRouter = express.Router();
   let totalRoutes = 0;
 
-  console.log(`  Feature: ${name}  →  ${prefix}`);
+  console.log(`  Module: ${name}  →  ${prefix}`);
 
   for (const { groupName, baseRegister, extendRegister } of routeGroups) {
     const baseCollector = createRouter();

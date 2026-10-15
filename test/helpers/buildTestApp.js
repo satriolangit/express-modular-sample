@@ -3,13 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import express from "express";
 import { discover } from "../../src/libs/bootstrap/discover.js";
-import { mountFeature } from "../../src/libs/mountFeature.js";
+import { mountModule } from "../../src/libs/mountModule.js";
 import { installFakeDeps } from "./fakes.js";
 
 const ROOT = path.join(import.meta.dirname, "..", "..");
 
 /**
- * Build an Express app with all features/extensions mounted against fake deps.
+ * Build an Express app with all modules/extensions mounted against fake deps.
  * Assumes `src/extensions/` has been populated (`npm run poc:copy`).
  */
 export async function buildTestApp(overrides = {}) {
@@ -26,19 +26,19 @@ export async function buildTestApp(overrides = {}) {
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true }));
 
-  const features = await discover(
-    path.join(ROOT, "src", "features"),
+  const modules = await discover(
+    path.join(ROOT, "src", "modules"),
     extensionsDir,
   );
 
-  for (const feature of features.values()) {
-    if (typeof feature.index?.init === "function") {
-      await feature.index.init(fakes);
+  for (const mod of modules.values()) {
+    if (typeof mod.index?.init === "function") {
+      await mod.index.init(fakes);
     }
-    if (typeof feature.extInit === "function") {
-      await feature.extInit(fakes);
+    if (typeof mod.extInit === "function") {
+      await mod.extInit(fakes);
     }
-    mountFeature(app, feature);
+    mountModule(app, mod);
   }
 
   // Error middleware — parity with index.js (Express 5 forwards async errors)
@@ -47,7 +47,7 @@ export async function buildTestApp(overrides = {}) {
     res.status(err.statusCode || 500).json({ error: "internal error" });
   });
 
-  return { app, fakes, features };
+  return { app, fakes, modules };
 }
 
 /**

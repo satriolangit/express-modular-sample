@@ -44,13 +44,13 @@ async function collectRoutesFromDir(dir, collected) {
   }
 }
 
-export async function discover(featuresDir, extensionsDir) {
-  const names = new Set([...listDirs(featuresDir), ...listDirs(extensionsDir)]);
+export async function discover(modulesDir, extensionsDir) {
+  const names = new Set([...listDirs(modulesDir), ...listDirs(extensionsDir)]);
 
-  const features = new Map();
+  const modules = new Map();
 
   for (const name of [...names].sort()) {
-    const basePath = path.join(featuresDir, name);
+    const basePath = path.join(modulesDir, name);
     const extPath = path.join(extensionsDir, name);
 
     const baseExists = fs.existsSync(basePath);
@@ -95,7 +95,7 @@ export async function discover(featuresDir, extensionsDir) {
       }
     }
 
-    features.set(name, {
+    modules.set(name, {
       name,
       index,
       extInit,
@@ -103,5 +103,5 @@ export async function discover(featuresDir, extensionsDir) {
       routeGroups,
     });
   }
-  return features;
+  return modules;
 }

@@ -73,7 +73,7 @@ export default {
         });
 
         socket.send(
-          JSON.stringify({ type: "welcome", feature: "user-management" }),
+          JSON.stringify({ type: "welcome", module: "user-management" }),
         );
 
         socket.on("message", (raw) => {
@@ -95,7 +95,7 @@ export default {
       { owner: "user-management" },
     );
 
-    // --- feature level scheduler register ---
+    // --- module level scheduler register ---
     scheduler.register({
       name: "user-management:sample scheduler task",
       schedule: "0 * * * *", // hourly

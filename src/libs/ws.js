@@ -1,12 +1,12 @@
-const { WebSocketServer, WebSocket } = require("ws");
-const config = require("./config");
-const logger = require("./logger");
+import { WebSocketServer, WebSocket } from "ws";
+import config from "./config.js";
+import logger from "./logger.js";
 
 let wss = null;
 const channels = new Map(); // path → { handler, owner }
 const heartbeats = new WeakMap(); // socket → { isAlive }
 
-function init(httpServer) {
+export function init(httpServer) {
   if (wss) return wss;
 
   wss = new WebSocketServer({
@@ -84,7 +84,7 @@ function init(httpServer) {
  * Register a WS handler for a specific path.
  * Throws if path is already registered — prevents accidental conflicts.
  */
-function register(path, handler, opts = {}) {
+export function register(path, handler, opts = {}) {
   if (!path.startsWith("/")) {
     throw new Error(`WS path must start with "/": ${path}`);
   }
@@ -98,15 +98,15 @@ function register(path, handler, opts = {}) {
   logger.debug("[ws] registered", { path, owner: opts.owner });
 }
 
-function unregister(path) {
+export function unregister(path) {
   channels.delete(path);
 }
 
-function listChannels() {
+export function listChannels() {
   return [...channels.entries()].map(([path, { owner }]) => ({ path, owner }));
 }
 
-function broadcast(path, payload) {
+export function broadcast(path, payload) {
   if (!wss) return 0;
   const data = typeof payload === "string" ? payload : JSON.stringify(payload);
   let count = 0;
@@ -121,16 +121,16 @@ function broadcast(path, payload) {
   return count;
 }
 
-function get() {
+export function get() {
   return wss;
 }
 
-async function healthCheck() {
+export async function healthCheck() {
   if (!wss) return false;
   return true;
 }
 
-async function close() {
+export async function close() {
   if (!wss) return;
   logger.info("[ws] closing server");
 
@@ -158,14 +158,3 @@ async function close() {
   channels.clear();
   logger.info("[ws] closed");
 }
-
-module.exports = {
-  init,
-  register,
-  unregister,
-  listChannels,
-  broadcast,
-  get,
-  healthCheck,
-  close,
-};

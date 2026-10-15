@@ -1,6 +1,6 @@
-const cron = require("node-cron");
-const config = require("./config");
-const logger = require("./logger");
+import cron from "node-cron";
+import config from "./config.js";
+import logger from "./logger.js";
 
 const tasks = new Map(); // name → { task, meta, state, handler }
 const pending = new Set(); // Set<Promise> — in-flight runs
@@ -17,7 +17,7 @@ const pending = new Set(); // Set<Promise> — in-flight runs
  * @param {string} [opts.owner]    - feature/extension name (for logs)
  * @returns {import('node-cron').ScheduledTask}
  */
-function register({
+export function register({
   name,
   schedule,
   handler,
@@ -118,7 +118,7 @@ function register({
 /**
  * Start all registered tasks. Called once after bootstrap init.
  */
-function startAll() {
+export function startAll() {
   if (!config.scheduler.enabled) {
     logger.warn(
       "[scheduler] disabled via SCHEDULER_ENABLED=false — no tasks started",
@@ -139,7 +139,7 @@ function startAll() {
 /**
  * Stop scheduling new runs and wait for in-flight tasks (up to waitMs).
  */
-async function stopAll({ waitMs = 10_000 } = {}) {
+export async function stopAll({ waitMs = 10_000 } = {}) {
   for (const entry of tasks.values()) {
     try {
       entry.task.stop();
@@ -161,7 +161,7 @@ async function stopAll({ waitMs = 10_000 } = {}) {
 /**
  * Fully destroy all tasks. Call after stopAll() in shutdown.
  */
-function destroyAll() {
+export function destroyAll() {
   for (const entry of tasks.values()) {
     try {
       entry.task.destroy();
@@ -173,13 +173,13 @@ function destroyAll() {
 /**
  * Manually trigger a task by name (useful for testing / admin endpoints).
  */
-async function trigger(name) {
+export async function trigger(name) {
   const entry = tasks.get(name);
   if (!entry) throw new Error(`scheduler.trigger: task not found: ${name}`);
   await entry.handler();
 }
 
-function list() {
+export function list() {
   return [...tasks.values()].map((e) => ({
     ...e.meta,
     isRunning: e.state.running,
@@ -188,16 +188,6 @@ function list() {
   }));
 }
 
-function get(name) {
+export function get(name) {
   return tasks.get(name);
 }
-
-module.exports = {
-  register,
-  startAll,
-  stopAll,
-  destroyAll,
-  trigger,
-  list,
-  get,
-};

@@ -1,6 +1,6 @@
-const { db } = require("../../../libs/deps");
+import { db } from "../../../libs/deps.js";
 
-module.exports = {
+export default {
   async findById(id) {
     const [row] = await db.query("SELECT * FROM products WHERE id = ?", [id]);
     return row ?? null;

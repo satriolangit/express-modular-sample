@@ -1,6 +1,6 @@
-const { db } = require("../../../libs/deps");
+import { db } from "../../../libs/deps.js";
 
-module.exports = {
+export default {
   async findByUserId(userId) {
     return db.query(
       `select * 

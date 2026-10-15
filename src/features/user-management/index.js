@@ -1,4 +1,4 @@
-module.exports = {
+export default {
   prefix: "/users",
 
   async init(deps) {

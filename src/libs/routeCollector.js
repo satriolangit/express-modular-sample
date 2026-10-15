@@ -9,7 +9,7 @@ function isOptions(v) {
   );
 }
 
-function createRouter() {
+export function createRouter() {
   const routes = [];
   const r = {};
 
@@ -25,5 +25,3 @@ function createRouter() {
   Object.defineProperty(r, "__routes", { value: routes });
   return r;
 }
-
-module.exports = { createRouter };

@@ -1,7 +1,7 @@
-const roleRepo = require("../repositories/repo.role");
+import roleRepo from "../repositories/repo.role.js";
 
 async function listRoles() {
   return roleRepo.findAll();
 }
 
-module.exports = { listRoles };
+export default { listRoles };

@@ -1,6 +1,6 @@
-const userService = require("../services/service.user");
+import userService from "../services/service.user.js";
 
-module.exports = function registerUser(r) {
+export default function registerUser(r) {
   r.get("/", async (req, res) => {
     res.json(await userService.listUsers());
   });
@@ -12,4 +12,4 @@ module.exports = function registerUser(r) {
       res.status(404).json({ error: e.message });
     }
   });
-};
+}

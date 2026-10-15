@@ -1,19 +1,23 @@
-require("dotenv").config();
+import "dotenv/config";
 
-const http = require("http");
-const express = require("express");
-const path = require("path");
+import http from "node:http";
+import path from "node:path";
+import express from "express";
+
+import config from "./src/libs/config.js";
+import logger from "./src/libs/logger.js";
+import * as nats from "./src/libs/nats.js";
+import * as db from "./src/libs/db.js";
+import * as ws from "./src/libs/ws.js";
+import * as scheduler from "./src/libs/scheduler.js";
+import { populate } from "./src/libs/deps.js";
+import { discover } from "./src/libs/bootstrap/discover.js";
+import { mountFeature } from "./src/libs/mountFeature.js";
 
 async function main() {
   // ────────────────────────────────────────────────
-  // CONFIG
-  // ────────────────────────────────────────────────
-  const config = require("./src/libs/config");
-
-  // ────────────────────────────────────────────────
   // LOGGER (sync — Winston)
   // ────────────────────────────────────────────────
-  const logger = require("./src/libs/logger");
   logger.info("bootstrap starting", {
     app: config.appName,
     env: config.env,
@@ -22,7 +26,6 @@ async function main() {
   // ────────────────────────────────────────────────
   // NATS (async — must await connect)
   // ────────────────────────────────────────────────
-  const nats = require("./src/libs/nats");
   try {
     await nats.init();
   } catch (err) {
@@ -37,7 +40,6 @@ async function main() {
   // ────────────────────────────────────────────────
   // POSTGRES (sync — Pool lazy connect)
   // ────────────────────────────────────────────────
-  const db = require("./src/libs/db");
   db.getPool(); // trigger pool creation
 
   try {
@@ -81,19 +83,12 @@ async function main() {
   // ────────────────────────────────────────────────
   // WEBSOCKET (attach to http.Server)
   // ────────────────────────────────────────────────
-  const ws = require("./src/libs/ws");
   ws.init(httpServer);
-
-  // ────────────────────────────────────────────────
-  // SCHEDULER (sync — tasks registered later)
-  // ────────────────────────────────────────────────
-  const scheduler = require("./src/libs/scheduler");
 
   // ────────────────────────────────────────────────
   // POPULATE DEPS
   // ────────────────────────────────────────────────
-  const deps = require("./src/libs/deps");
-  Object.assign(deps, {
+  const deps = {
     config,
     logger,
     db,
@@ -101,7 +96,8 @@ async function main() {
     ws,
     scheduler,
     http: httpServer,
-  });
+  };
+  populate(deps);
 
   logger.info("deps populated");
 
@@ -129,12 +125,9 @@ async function main() {
   // ────────────────────────────────────────────────
   // DISCOVER FEATURES
   // ────────────────────────────────────────────────
-  const { discover } = require("./src/libs/bootstrap/discover");
-  const { mountFeature } = require("./src/libs/mountFeature");
-
-  const features = discover(
-    path.join(__dirname, "src", "features"),
-    path.join(__dirname, "src", "extensions"),
+  const features = await discover(
+    path.join(import.meta.dirname, "src", "features"),
+    path.join(import.meta.dirname, "src", "extensions"),
   );
 
   logger.info(`discovered ${features.size} feature(s)`);
@@ -210,6 +203,21 @@ async function main() {
       uptimeSec: Math.floor(process.uptime()),
       checks,
     });
+  });
+
+  // ────────────────────────────────────────────────
+  // ERROR HANDLING (Express 5 forwards async errors here)
+  // ────────────────────────────────────────────────
+  app.use((err, req, res, next) => {
+    logger.error("unhandled request error", {
+      reqId: req.id,
+      method: req.method,
+      path: req.originalUrl,
+      error: err.message,
+      stack: err.stack,
+    });
+    if (res.headersSent) return next(err);
+    res.status(err.statusCode || 500).json({ error: "internal error" });
   });
 
   // ────────────────────────────────────────────────

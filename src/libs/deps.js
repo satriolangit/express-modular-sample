@@ -1,6 +1,6 @@
 /**
  * Shared dependency bag (live bindings).
- * Populated by root index.js BEFORE any feature is dynamically imported.
+ * Populated by root index.js BEFORE any module is dynamically imported.
  *
  * Access rules:
  *   ✅ import { db, logger } from './libs/deps.js';  // live binding — selalu nilai terbaru

@@ -7,13 +7,13 @@ test("repositories/services use $1 placeholders and extract rows", async () => {
   installFakeDeps({ db: fake });
 
   const { default: repoUser } =
-    await import("../src/features/user-management/repositories/repo.user.js");
+    await import("../src/modules/user-management/repositories/repo.user.js");
   const { default: repoRole } =
-    await import("../src/features/user-management/repositories/repo.role.js");
+    await import("../src/modules/user-management/repositories/repo.role.js");
   const { default: repoProduct } =
-    await import("../src/features/product-management/repositories/repo.product.js");
+    await import("../src/modules/product-management/repositories/repo.product.js");
   const { default: servicePolicy } =
-    await import("../src/features/product-management/services/service.policy.js");
+    await import("../src/modules/product-management/services/service.policy.js");
   const { default: repoAudit } =
     await import("../src/extensions/audit-user/repositories/repo.audit.js");
 

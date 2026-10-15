@@ -203,7 +203,7 @@ export async function init({ isBackgroundRetry = false } = {}) {
       await cleanupContext();
       lastError = err;
 
-      // Notify feature code (non-fatal)
+      // Notify module code (non-fatal)
       fire(lostHandlers, err);
 
       // Start background retry
@@ -230,12 +230,12 @@ export async function init({ isBackgroundRetry = false } = {}) {
 
   logger.info("[nats] connected");
 
-  // Notify feature code (untuk re-subscribe saat reconnect)
+  // Notify module code (untuk re-subscribe saat reconnect)
   if (isBackgroundRetry) {
-    logger.info("[nats] notifying features to re-subscribe");
+    logger.info("[nats] notifying modules to re-subscribe");
     fire(connectedHandlers, ctx);
   } else {
-    // Initial connect juga fire — supaya feature bisa register di sini
+    // Initial connect juga fire — supaya module bisa register di sini
     fire(connectedHandlers, ctx);
   }
 

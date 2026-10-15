@@ -14,7 +14,7 @@ const pending = new Set(); // Set<Promise> — in-flight runs
  * @param {Function} opts.handler  - async () => void
  * @param {string} [opts.timezone] - IANA tz; default config.scheduler.timezone
  * @param {boolean} [opts.runOnInit] - run once at startup
- * @param {string} [opts.owner]    - feature/extension name (for logs)
+ * @param {string} [opts.owner]    - module/extension name (for logs)
  * @returns {import('node-cron').ScheduledTask}
  */
 export function register({

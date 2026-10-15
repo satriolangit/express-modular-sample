@@ -101,14 +101,6 @@ async function main() {
 
   logger.info("deps populated");
 
-  nats.onLost((err) => {
-    logger.warn("NATS connection lost — application in degraded mode", {
-      error: err.message,
-      impact: "NATS publish/subscribe disabled until app restart",
-    });
-    // optional: metrics, alerting, health probe marking
-  });
-
   // ────────────────────────────────────────────────
   // REGISTER GLOBAL SCHEDULED TASKS
   // ────────────────────────────────────────────────
@@ -231,6 +223,7 @@ async function main() {
       error: err.message,
       impact: "NATS publish/subscribe disabled until reconnect",
     });
+    // optional: metrics, alerting, health probe marking
   });
 
   nats.onConnected(() => {
@@ -265,13 +258,24 @@ function setupShutdown({ httpServer, db, nats, ws, logger, scheduler }) {
     }, 15_000);
     forceTimer.unref();
 
-    // HTTP: stop new connections, wait for in-flight ──
-    await new Promise((resolve) => {
+    // HTTP: stop accepting new connections. Callback di-await terakhir —
+    // upgraded WS sockets tidak ditrack HTTP server dan bisa menahan 'close'.
+    const httpClosed = new Promise((resolve) => {
       httpServer.close((err) => {
         if (err) logger.warn("http close error", { error: err.message });
         resolve();
       });
     });
+
+    // ── WebSocket: close all clients ──
+    try {
+      await ws.close();
+      logger.info("ws closed");
+    } catch (err) {
+      logger.error("ws close error", { error: err.message });
+    }
+
+    await httpClosed;
     logger.info("http closed");
 
     // -- Scheduler: stop new runs, wait in-flight  ← NEW
@@ -280,14 +284,6 @@ function setupShutdown({ httpServer, db, nats, ws, logger, scheduler }) {
       scheduler.destroyAll();
     } catch (err) {
       logger.error("scheduler close error", { error: err.message });
-    }
-
-    // ── WebSocket: close all clients ──
-    try {
-      await ws.close();
-      logger.info("ws closed");
-    } catch (err) {
-      logger.error("ws close error", { error: err.message });
     }
 
     // ── NATS: drain pending publish + unsubscribe ──

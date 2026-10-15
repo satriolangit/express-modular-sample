@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "test": "node --test test/",
+    "test": "node --test \"test/**/*.test.js\"",
     "merge:ext": "node scripts/merge-package.js",
     "merge:ext:dry": "node scripts/merge-package.js --dry-run",
     "poc:copy": "node scripts/copy-extensions.js"

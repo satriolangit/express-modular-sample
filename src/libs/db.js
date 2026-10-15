@@ -90,6 +90,39 @@ export async function healthCheck() {
   return rows[0]?.ok === 1;
 }
 
+// ─────────────────────────────────────────────────────
+// Insert helper (parameterized values, generated column list)
+// ─────────────────────────────────────────────────────
+const IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
+
+export function buildInsertSQL(table, columns) {
+  if (!IDENTIFIER.test(table)) {
+    throw new Error(`[pg] invalid table name: ${table}`);
+  }
+  if (columns.length === 0) {
+    throw new Error("[pg] insert requires at least one column");
+  }
+  for (const col of columns) {
+    if (!IDENTIFIER.test(col)) {
+      throw new Error(`[pg] invalid column name: ${col}`);
+    }
+  }
+  const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
+  return `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders}) RETURNING *`;
+}
+
+/**
+ * Insert a row built from object keys. Values are always parameterized;
+ * table/column names are validated identifiers.
+ * Usage: const row = await insert('audit_logs', { id, user_id, action });
+ */
+export async function insert(table, row) {
+  const columns = Object.keys(row ?? {});
+  const params = columns.map((col) => row[col]);
+  const { rows } = await query(buildInsertSQL(table, columns), params);
+  return rows[0];
+}
+
 export async function close() {
   if (pool) {
     logger.info("[pg] closing pool");

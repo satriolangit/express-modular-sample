@@ -9,3 +9,6 @@ package.json
 .CLAUDE.md
 .AGENTS.md
 .docs/
+
+# Agent-workflow docs (superpowers plans/specs) — not part of the product.
+superpowers/

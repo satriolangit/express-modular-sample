@@ -1,5 +1,7 @@
 # CONTRACT — Aturan Komposisi base-api & extension-api
 
+> **Bahasa Indonesia | [English](./en/CONTRACT.md)**
+
 > **Dokumen ini menjawab:** "Aturan apa yang tidak boleh dilanggar?"
 > Untuk memahami cara kerja sistem, baca [ARCHITECTURE.md](./ARCHITECTURE.md).
 > Untuk tutorial langkah-demi-langkah, baca [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md).

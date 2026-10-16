@@ -1,5 +1,7 @@
 # base-api — Modular API Starter (Express 5 + ESM)
 
+> **Bahasa Indonesia | [English](README.en.md)**
+
 Aplikasi inti (*base*) dari arsitektur modular base + extension: satu aplikasi Express, banyak `module` fitur, dan repo `extension` terpisah untuk kustomisasi per klien. Lihat [ARCHITECTURE.md](docs/ARCHITECTURE.md) untuk gambaran lengkap.
 
 - **Runtime:** Node.js ≥ 20.11 (disarankan 22), ESM (`"type": "module"`)

@@ -1,5 +1,7 @@
 # ARCHITECTURE — base-api & extension-api
 
+> **Bahasa Indonesia | [English](./en/ARCHITECTURE.md)**
+
 > **Dokumen ini menjawab:** "Bagaimana sistem ini bekerja, dan kenapa didesain begitu?"
 > Untuk aturan yang tidak boleh dilanggar, baca [CONTRACT.md](./CONTRACT.md).
 > Untuk langkah praktik menulis kode, baca [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md).

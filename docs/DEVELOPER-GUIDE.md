@@ -1,5 +1,7 @@
 # DEVELOPER-GUIDE — Dari Nol Sampai Bisa Berkontribusi
 
+> **Bahasa Indonesia | [English](./en/DEVELOPER-GUIDE.md)**
+
 > **Dokumen ini menjawab:** "Bagaimana cara kerjanya di praktik?"
 > Untuk memahami desain sistem, baca [ARCHITECTURE.md](./ARCHITECTURE.md).
 > Untuk aturan yang tidak boleh dilanggar, baca [CONTRACT.md](./CONTRACT.md).

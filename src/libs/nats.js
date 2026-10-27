@@ -103,6 +103,34 @@ function stopBackgroundRetry() {
 }
 
 // ─────────────────────────────────────────────────────
+// JetStream
+// ─────────────────────────────────────────────────────
+/**
+ * Attach JetStream to an existing NATS connection.
+ * A server without JetStream must not take the whole app down.
+ */
+export async function initJetStream(nc) {
+  if (
+    !nc ||
+    typeof nc.jetstreamManager !== "function" ||
+    typeof nc.jetstream !== "function"
+  ) {
+    return { js: null, jsm: null };
+  }
+
+  try {
+    const jsm = await nc.jetstreamManager();
+    const js = nc.jetstream();
+    return { js, jsm };
+  } catch (err) {
+    logger.warn("[nats] JetStream unavailable — continuing without it", {
+      error: err.message,
+    });
+    return { js: null, jsm: null };
+  }
+}
+
+// ─────────────────────────────────────────────────────
 // Init
 // ─────────────────────────────────────────────────────
 export async function init({ isBackgroundRetry = false } = {}) {
@@ -221,8 +249,7 @@ export async function init({ isBackgroundRetry = false } = {}) {
   let js = null;
   let jsm = null;
   if (config.nats.jetstream) {
-    jsm = await nc.jetstreamManager();
-    js = nc.jetstream();
+    ({ js, jsm } = await initJetStream(nc));
   }
 
   ctx = { nc, js, jsm, sc: StringCodec() };

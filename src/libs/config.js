@@ -4,6 +4,7 @@ const config = {
 
   http: {
     port: Number(process.env.PORT) || 3000,
+    trustProxy: process.env.TRUST_PROXY === "true",
   },
 
   pg: {

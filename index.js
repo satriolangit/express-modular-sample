@@ -63,10 +63,9 @@ async function main() {
   // HTTP SERVER + EXPRESS
   // ────────────────────────────────────────────────
   const app = express();
-  app.use(express.json({ limit: "1mb" }));
-  app.use(express.urlencoded({ extended: true }));
+  app.set("trust proxy", config.http.trustProxy);
 
-  // Request ID + access log
+  // Request ID + access log — before body parsers so parse errors keep reqId
   app.use((req, res, next) => {
     req.id =
       req.headers["x-request-id"] ||
@@ -86,7 +85,19 @@ async function main() {
     next();
   });
 
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: true }));
+
   const httpServer = http.createServer(app);
+
+  httpServer.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      logger.error(`port ${config.http.port} is already in use`);
+    } else {
+      logger.error("http server error", { error: err.message });
+    }
+    process.exit(1);
+  });
 
   // ────────────────────────────────────────────────
   // WEBSOCKET (attach to http.Server)
@@ -257,7 +268,7 @@ async function main() {
 function setupShutdown({ httpServer, db, nats, ws, logger, scheduler }) {
   let shuttingDown = false;
 
-  const shutdown = async (signal) => {
+  const shutdown = async (signal, exitCode = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
 
@@ -314,7 +325,7 @@ function setupShutdown({ httpServer, db, nats, ws, logger, scheduler }) {
     }
 
     logger.info("shutdown complete");
-    process.exit(0);
+    process.exit(exitCode);
   };
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));
@@ -329,7 +340,8 @@ function setupShutdown({ httpServer, db, nats, ws, logger, scheduler }) {
 
   process.on("uncaughtException", (err) => {
     logger.error("uncaughtException", { error: err.message, stack: err.stack });
-    shutdown("uncaughtException");
+    process.exitCode = 1;
+    shutdown("uncaughtException", 1);
   });
 }
 

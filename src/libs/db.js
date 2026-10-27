@@ -70,16 +70,29 @@ export async function query(sql, params = []) {
  *     await client.query('UPDATE ...');
  *   });
  */
-export async function tx(fn) {
-  const client = await getPool().connect();
+export async function runTx(client, fn) {
   try {
     await client.query("BEGIN");
     const result = await fn(client);
     await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackErr) {
+      logger.error("[pg] rollback failed", {
+        error: rollbackErr.message,
+        originalError: err.message,
+      });
+    }
     throw err;
+  }
+}
+
+export async function tx(fn) {
+  const client = await getPool().connect();
+  try {
+    return await runTx(client, fn);
   } finally {
     client.release();
   }

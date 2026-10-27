@@ -13,6 +13,7 @@ import * as scheduler from "./src/libs/scheduler.js";
 import { populate } from "./src/libs/deps.js";
 import { discover } from "./src/libs/bootstrap/discover.js";
 import { mountModule } from "./src/libs/mountModule.js";
+import { computeHealth } from "./src/libs/health.js";
 
 async function main() {
   // ────────────────────────────────────────────────
@@ -196,11 +197,12 @@ async function main() {
       checks.ws = await ws.healthCheck();
     } catch {}
 
-    const ok = checks.pg && checks.nats;
-    res.status(ok ? 200 : 503).json({
-      ok,
+    const health = computeHealth(checks, {
+      natsRequired: config.nats.required,
+    });
+    res.status(health.ok ? 200 : 503).json({
+      ...health,
       uptimeSec: Math.floor(process.uptime()),
-      checks,
     });
   });
 

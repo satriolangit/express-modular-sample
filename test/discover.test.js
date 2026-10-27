@@ -70,3 +70,10 @@ test("discover rejects non-extend route files in the extension root", async () =
 test("discover rejects an invalid init hook", async () => {
   await assert.rejects(() => discoverFixture("invalid-init"), /init/);
 });
+
+test("discover rejects an extension init that is not a function", async () => {
+  await assert.rejects(
+    () => discoverFixture("invalid-ext-init"),
+    /Extension init must export default function/,
+  );
+});

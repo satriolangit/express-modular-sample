@@ -140,6 +140,11 @@ export async function discover(modulesDir, extensionsDir) {
       const extInitPath = path.join(extPath, "init.extend.js");
       if (fs.existsSync(extInitPath)) {
         extInit = await importModule(extInitPath);
+        if (typeof extInit !== "function") {
+          throw new Error(
+            `Extension init must export default function: ${extInitPath}`,
+          );
+        }
       }
     }
 

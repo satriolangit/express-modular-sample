@@ -1,12 +1,11 @@
 import express from "express";
 import { createRouter } from "./routeCollector.js";
 import { mergeRoutes } from "./mergeRoutes.js";
+import { sortRoutes } from "./routeOrder.js";
 
 export function mountModule(app, { name, prefix, routeGroups }) {
   const finalRouter = express.Router();
-  let totalRoutes = 0;
-
-  console.log(`  Module: ${name}  →  ${prefix}`);
+  const routes = [];
 
   for (const { groupName, baseRegister, extendRegister } of routeGroups) {
     const baseCollector = createRouter();
@@ -20,23 +19,25 @@ export function mountModule(app, { name, prefix, routeGroups }) {
       extend: extCollector.__routes,
     });
 
-    if (merged.length === 0) continue;
-
-    console.log(`    [${groupName}]`);
-
     for (const rt of merged) {
-      finalRouter[rt.method](rt.path, ...rt.handlers);
-
-      const mode = rt.opts?._mode ? ` [${rt.opts._mode}]` : "";
-      const shownPath = `${prefix}${rt.path === "/" ? "" : rt.path}`;
-      console.log(
-        `      ${rt.method.toUpperCase().padEnd(7)} ${shownPath}${mode}`,
-      );
-
-      totalRoutes++;
+      routes.push({ ...rt, groupName });
     }
   }
 
+  const ordered = sortRoutes(routes);
+
+  console.log(`  Module: ${name}  →  ${prefix}`);
+
+  for (const rt of ordered) {
+    finalRouter[rt.method](rt.path, ...rt.handlers);
+
+    const mode = rt.opts?._mode ? ` [${rt.opts._mode}]` : "";
+    const shownPath = `${prefix}${rt.path === "/" ? "" : rt.path}`;
+    console.log(
+      `      [${rt.groupName}] ${rt.method.toUpperCase().padEnd(7)} ${shownPath}${mode}`,
+    );
+  }
+
   app.use(prefix, finalRouter);
-  console.log(`  ✓ ${totalRoutes} routes mounted\n`);
+  console.log(`  ✓ ${ordered.length} routes mounted\n`);
 }

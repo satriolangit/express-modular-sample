@@ -7,7 +7,7 @@ The core application (*base*) of the modular base + extension architecture: one 
 - **Runtime:** Node.js ≥ 20.11 (22 recommended), ESM (`"type": "module"`)
 - **HTTP:** Express 5
 - **Infra:** PostgreSQL (required), NATS + JetStream (optional), WebSocket, node-cron
-- **Tests:** `node:test` + fake deps — no database needed (40/40 passing)
+- **Tests:** `node:test` + fake deps — no database needed (43/43 passing)
 - **Status:** POC / starter — see [limitations](docs/en/ARCHITECTURE.md#9-current-design-limitations-poc)
 
 ## Quickstart (5 minutes)

@@ -163,7 +163,6 @@ sequenceDiagram
         IX->>MOD: mod.extInit(deps)
         Note over MOD: error → exit(1)
     end
-    IX->>IX: scheduler.startAll()
     loop every module
         IX->>APP: mountModule(app, mod)
     end
@@ -366,7 +365,7 @@ Callbacks provided:
 
 **Why is the re-subscribe pattern important?** After a reconnect via background retry, the old subscriptions have died together with the old connection. That is why every module registers an idempotent `setup()` function with `onConnected` — the full pattern is in [CONTRACT.md §6](./CONTRACT.md#6-nats-contract) and the tutorial is in [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md).
 
-**JetStream is optional.** If the NATS server is up but JetStream is disabled, `initJetStream()` catches the error, `js`/`jsm` become `null`, and the app still boots in degraded mode. Background retry after a permanent connection loss only runs when `NATS_AUTO_RETRY_AFTER_EXHAUST=true` (default `false`).
+**JetStream is optional.** If the NATS server is up but JetStream is disabled, `initJetStream()` catches the error, `js`/`jsm` become `null`, and the app still boots in degraded mode. Background retry after a permanent connection loss only runs when `NATS_AUTO_RETRY_AFTER_EXHAUST=true` (default `false`). The `/health` endpoint includes `checks.jetstream`; when JetStream is down, `degraded: true`, but readiness stays `200` as long as NATS is not `required`.
 
 Two publish modes:
 - `publish(subject, payload)` — core NATS, fire-and-forget, returns `false` if unavailable.
@@ -471,14 +470,14 @@ This document is honest about its limitations — don't let beginners assume eve
 | --- | --- | --- |
 | Hardcoded auth | The `auth` middleware always sets the user `Catherine/admin`; no JWT/session verification yet | `extension-api/src/user-management/middleware.extend.js` |
 | In-memory rate limit | The Map is cleaned up periodically, but it is still per-process — not suitable for multi-instance deployments | the same file |
-| `API_KEY` not used yet | Present in config and `.env`, not checked anywhere | `src/libs/config.js` |
+| `API_KEY` not used yet | Present in config and `.env.example`, not checked anywhere | `src/libs/config.js` |
 | Required env | `assertRequiredConfig()` refuses to start when `PG_HOST/PORT/USER/PASSWORD/DATABASE` is missing; there are no credential fallbacks | `src/libs/config.js` |
 | Build-time composition | Extensions are not runtime plugins; adding an extension means re-running `poc:copy` + restart | `scripts/copy-extensions.js` |
 | Fail-fast boot | A single extension error during `init` fails the entire application (`process.exit(1)`) | `index.js` |
 | WebSocket without auth | Upgrades are accepted for all registered paths | `src/libs/ws.js` |
 | No CORS/helmet | No standard HTTP hardening yet | `index.js` |
 
-Hardening plans are outside the scope of this document; for now, **do not use the POC configuration for production data**.
+The limitations above are what remains in this POC after the hardening pass; for now, **do not use the POC configuration for production data**.
 
 ---
 

@@ -37,7 +37,7 @@ Setiap bab berisi: aturan, contoh ✅, contoh ❌, dan **akibat pelanggaran**. K
 | 6 | Path WS (`/ws/...`) dan nama task scheduler harus unik dan dinamespace per module. |
 | 7 | Subscribe NATS lewat pola `onConnected` + cek `isAvailable()`; jangan di top-level. |
 | 8 | `package.base.json` adalah source of truth; `package.json` generated. |
-| 9 | `npm run poc:copy` sebelum `npm test` (test butuh `src/extensions/`). |
+| 9 | `node scripts/copy-extensions.js` sebelum `npm test` (test butuh `src/extensions/`); pada clone baru jalankan bootstrap `node scripts/...` dulu. |
 | 10 | Route static (`/roles`, `/policies`) harus dievaluasi sebelum route parameter (`/:id`). |
 
 ---
@@ -234,6 +234,7 @@ GET /roles      ← route.role.js                      → tidak ada extension �
 | `{ mergeMiddleware: true }` | `merge` | `middlewareBase → middlewareExt → handler` |
 | `{ mergeMiddleware: true, keepBaseHandler: true }` | `merge+keep` | `middlewareBase → middlewareExt → handlerBase` |
 | `{ prepend: [...], mergeMiddleware: true }` | `prepend+merge` | `prepend → middlewareBase → middlewareExt → handler` |
+| `{ prepend: [...], mergeMiddleware: true, keepBaseHandler: true }` | `prepend+merge+keep` | `prepend → middlewareBase → middlewareExt → handlerBase` |
 | Tidak ada pasangan base | `new` | Route extension apa adanya |
 
 Catatan:
@@ -681,7 +682,7 @@ const { default: repoUser } = await import("../src/modules/.../repo.user.js");
 await db.query("...");               // TypeError: null
 
 // ❌ Test yang menembak PostgreSQL/NATS asli
-const pool = new pg.Pool({ host: "8.215.75.12", ... });
+const pool = new pg.Pool({ host: "<pg-host>", ... });
 
 // ❌ Mengandalkan urutan/state antar file test
 ```
@@ -689,7 +690,7 @@ const pool = new pg.Pool({ host: "8.215.75.12", ... });
 ### Checklist saat menambah module baru
 
 - [ ] Test di `test/` mengimpor module lewat `discover()` (buildTestApp) atau langsung dengan fake deps
-- [ ] Jalankan `npm run poc:copy` sebelum `npm test`
+- [ ] Jalankan `node scripts/copy-extensions.js` sebelum `npm test`
 - [ ] Jika menambah SQL baru, tambahkan pola di `fakeDb()` supaya test route bisa masuk ke jalur sukses
 - [ ] Verifikasi route table yang dicetak `mountModule` sesuai harapan (terutama urutan static vs `/:id`)
 
@@ -709,7 +710,7 @@ const pool = new pg.Pool({ host: "8.215.75.12", ... });
 | Tidak berhak | `403 { "error": "forbidden", "need": "<role>" }` | Dari `requireRole` |
 | Terlalu banyak request | `429 { "error": "too many requests" }` | Dari `rateLimit` |
 | Sukses | JSON body langsung | Tanpa envelope; array = array; object = object |
-| Health | `200/503 { ok, degraded, uptimeSec, checks }` | `ok = checks.pg && (checks.nats \|\| !NATS_REQUIRED)`; `degraded = !checks.nats` |
+| Health | `200/503 { ok, degraded, uptimeSec, checks }` | `checks` berisi `pg`, `nats`, `jetstream`, `ws`; `ok = checks.pg && (checks.nats \|\| !NATS_REQUIRED)`; `degraded = !checks.nats \|\| !checks.jetstream` |
 
 Aturan tambahan:
 - Domain "tidak ditemukan" dilempar sebagai `NotFoundError` dan dipetakan oleh `handleRouteError()` menjadi 404. Error lain (DB, bug) dibiarkan naik ke error middleware → `500 { "error": "internal error" }`.

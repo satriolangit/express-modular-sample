@@ -119,12 +119,13 @@ SQL
 
 ### 2.3 Adjust `.env` (base-api)
 
-The `.env` file in `express-modular-sample/` defines the connections. For local use:
+The `.env` file in `express-modular-sample/` defines the connections. For local use (copy from `.env.example`):
 
 ```dotenv
 PORT=3000
 NODE_ENV=development
 LOG_LEVEL=debug
+TRUST_PROXY=false
 
 # PostgreSQL — REQUIRED
 PG_HOST=localhost
@@ -138,7 +139,9 @@ NATS_SERVERS=nats://localhost:4222
 NATS_REQUIRED=false
 ```
 
-Other variables (`WS_HEARTBEAT_MS`, `SCHEDULER_ENABLED`, etc.) can be found in `.env` or `src/libs/config.js`.
+`TRUST_PROXY=true` is only used when the app sits behind a trusted reverse proxy; the default is `false`. This value affects `req.ip`, which the rate limiter uses.
+
+Other variables (`WS_HEARTBEAT_MS`, `SCHEDULER_ENABLED`, etc.) can be found in `.env.example` or `src/libs/config.js`.
 
 ### 2.4 Bootstrap commands
 
@@ -201,7 +204,7 @@ On startup, the application prints the **route table**. It is the map of every e
 
 ```bash
 curl -s http://localhost:3000/health
-# {"ok":true,"degraded":false,"checks":{"pg":true,"nats":true,"ws":true},"uptimeSec":3}
+# {"ok":true,"degraded":false,"checks":{"pg":true,"nats":true,"jetstream":true,"ws":true},"uptimeSec":3}
 
 curl -s http://localhost:3000/users/1
 # {"id":1,"name":"Alice","roles":["admin"],"enriched":true}
@@ -232,8 +235,8 @@ The `/users/1` response has `enriched` and `roles` — proof that the extension 
 ### 3.1 Commands
 
 ```bash
-npm run poc:copy   # MUST come first — tests need src/extensions/
-npm test           # node --test "test/**/*.test.js"
+node scripts/copy-extensions.js   # MUST come first — tests need src/extensions/
+npm test                          # node --test "test/**/*.test.js"
 ```
 
 Expected output (abridged):
@@ -241,8 +244,8 @@ Expected output (abridged):
 ```text
 ok 1 - repositories/services use $1 placeholders and extract rows
 ...
-ok 40 - rate limit rejects requests over the limit and resets after the window
-# tests 40
+ok 43 - rate limit rejects requests over the limit and resets after the window
+# tests 43
 # pass 40
 # fail 0
 ```
@@ -302,7 +305,7 @@ test("GET /users", async () => {
 
 ### Checklist
 
-- [ ] `npm test` is green (40/40)
+- [ ] `npm test` is green (43/43)
 - [ ] You understand the difference between `installFakeDeps` (unit-level) and `buildTestApp` (HTTP-level)
 - [ ] You know why `poc:copy` must be run before tests
 

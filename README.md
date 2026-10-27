@@ -7,7 +7,7 @@ Aplikasi inti (*base*) dari arsitektur modular base + extension: satu aplikasi E
 - **Runtime:** Node.js ≥ 20.11 (disarankan 22), ESM (`"type": "module"`)
 - **HTTP:** Express 5
 - **Infra:** PostgreSQL (wajib), NATS + JetStream (opsional), WebSocket, node-cron
-- **Test:** `node:test` + fake deps — tanpa database (40/40 hijau)
+- **Test:** `node:test` + fake deps — tanpa database (43/43 hijau)
 - **Status:** POC / starter — lihat [batasan](docs/ARCHITECTURE.md#9-batasan-desain-saat-ini-poc)
 
 ## Quickstart (5 menit)

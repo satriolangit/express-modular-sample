@@ -163,7 +163,6 @@ sequenceDiagram
         IX->>MOD: mod.extInit(deps)
         Note over MOD: error → exit(1)
     end
-    IX->>IX: scheduler.startAll()
     loop setiap module
         IX->>APP: mountModule(app, mod)
     end
@@ -366,7 +365,7 @@ Callback yang disediakan:
 
 **Kenapa pola re-subscribe penting?** Setelah reconnect lewat background retry, subscription lama sudah mati bersama koneksi lama. Karena itu setiap module mendaftarkan fungsi `setup()` yang idempoten ke `onConnected` — pola lengkapnya di [CONTRACT.md §6](./CONTRACT.md#6-nats-contract) dan tutorial di [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md).
 
-**JetStream opsional.** Jika server NATS hidup tetapi JetStream tidak aktif, `initJetStream()` menangkap error, `js`/`jsm` menjadi `null`, dan aplikasi tetap boot dalam degraded mode. Background retry setelah koneksi hilang permanen hanya aktif bila `NATS_AUTO_RETRY_AFTER_EXHAUST=true` (default `false`).
+**JetStream opsional.** Jika server NATS hidup tetapi JetStream tidak aktif, `initJetStream()` menangkap error, `js`/`jsm` menjadi `null`, dan aplikasi tetap boot dalam degraded mode. Background retry setelah koneksi hilang permanen hanya aktif bila `NATS_AUTO_RETRY_AFTER_EXHAUST=true` (default `false`). Endpoint `/health` menyertakan `checks.jetstream`; bila JetStream mati, `degraded: true`, tetapi readiness tetap `200` selama NATS tidak `required`.
 
 Publish dua mode:
 - `publish(subject, payload)` — core NATS, fire-and-forget, return `false` jika tidak tersedia.
@@ -471,14 +470,14 @@ Dokumen ini jujur soal keterbatasan — jangan sampai pemula mengira semua sudah
 | --- | --- | --- |
 | Auth hardcoded | Middleware `auth` selalu set user `Catherine/admin`; belum verifikasi JWT/session | `extension-api/src/user-management/middleware.extend.js` |
 | Rate limit in-memory | Map dibersihkan berkala, tetapi tetap per-process — tidak cocok untuk multi-instance | file yang sama |
-| `API_KEY` belum dipakai | Ada di config dan `.env`, tidak dicek di manapun | `src/libs/config.js` |
+| `API_KEY` belum dipakai | Ada di config dan `.env.example`, tidak dicek di manapun | `src/libs/config.js` |
 | Env wajib | `assertRequiredConfig()` menolak start bila `PG_HOST/PORT/USER/PASSWORD/DATABASE` kosong; tidak ada fallback kredensial | `src/libs/config.js` |
 | Komposisi build-time | Extension bukan plugin runtime; menambah extension = jalankan ulang `poc:copy` + restart | `scripts/copy-extensions.js` |
 | Boot fail-fast | Satu extension error saat `init` menggagalkan seluruh aplikasi (`process.exit(1)`) | `index.js` |
 | WebSocket tanpa auth | Upgrade diterima untuk semua path terdaftar | `src/libs/ws.js` |
 | Tanpa CORS/helmet | Belum ada hardening HTTP standar | `index.js` |
 
-Rencana hardening ada di luar scope dokumen ini; sementara ini, **jangan pakai konfigurasi POC untuk data produksi**.
+Batasan di atas adalah sisa konfigurasi POC setelah hardening pass; sementara ini, **jangan pakai konfigurasi POC untuk data produksi**.
 
 ---
 

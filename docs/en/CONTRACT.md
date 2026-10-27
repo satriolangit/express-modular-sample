@@ -37,7 +37,7 @@ Every chapter contains: rules, ✅ examples, ❌ examples, and the **consequence
 | 6 | WS paths (`/ws/...`) and scheduler task names must be unique and namespaced per module. |
 | 7 | Subscribe to NATS via the `onConnected` pattern + check `isAvailable()`; never at top-level. |
 | 8 | `package.base.json` is the source of truth; `package.json` is generated. |
-| 9 | `npm run poc:copy` before `npm test` (tests need `src/extensions/`). |
+| 9 | `node scripts/copy-extensions.js` before `npm test` (tests need `src/extensions/`); on a fresh clone run the `node scripts/...` bootstrap first. |
 | 10 | Static routes (`/roles`, `/policies`) must be evaluated before parameter routes (`/:id`). |
 
 ---
@@ -234,6 +234,7 @@ GET /roles      ← route.role.js                      → no extension → left
 | `{ mergeMiddleware: true }` | `merge` | `middlewareBase → middlewareExt → handler` |
 | `{ mergeMiddleware: true, keepBaseHandler: true }` | `merge+keep` | `middlewareBase → middlewareExt → handlerBase` |
 | `{ prepend: [...], mergeMiddleware: true }` | `prepend+merge` | `prepend → middlewareBase → middlewareExt → handler` |
+| `{ prepend: [...], mergeMiddleware: true, keepBaseHandler: true }` | `prepend+merge+keep` | `prepend → middlewareBase → middlewareExt → handlerBase` |
 | No matching base | `new` | The extension route as-is |
 
 Notes:
@@ -681,7 +682,7 @@ const { default: repoUser } = await import("../src/modules/.../repo.user.js");
 await db.query("...");               // TypeError: null
 
 // ❌ A test that hits a real PostgreSQL/NATS
-const pool = new pg.Pool({ host: "8.215.75.12", ... });
+const pool = new pg.Pool({ host: "<pg-host>", ... });
 
 // ❌ Relying on order/state across test files
 ```
@@ -689,7 +690,7 @@ const pool = new pg.Pool({ host: "8.215.75.12", ... });
 ### Checklist when adding a new module
 
 - [ ] Tests in `test/` import the module via `discover()` (buildTestApp) or directly with fake deps
-- [ ] Run `npm run poc:copy` before `npm test`
+- [ ] Run `node scripts/copy-extensions.js` before `npm test`
 - [ ] If you add new SQL, add a pattern in `fakeDb()` so that route tests can take the success path
 - [ ] Verify the route table printed by `mountModule` matches expectations (especially the static vs `/:id` order)
 
@@ -709,7 +710,7 @@ const pool = new pg.Pool({ host: "8.215.75.12", ... });
 | Forbidden | `403 { "error": "forbidden", "need": "<role>" }` | From `requireRole` |
 | Too many requests | `429 { "error": "too many requests" }` | From `rateLimit` |
 | Success | A raw JSON body | No envelope; array = array; object = object |
-| Health | `200/503 { ok, degraded, uptimeSec, checks }` | `ok = checks.pg && (checks.nats \|\| !NATS_REQUIRED)`; `degraded = !checks.nats` |
+| Health | `200/503 { ok, degraded, uptimeSec, checks }` | `checks` contains `pg`, `nats`, `jetstream`, `ws`; `ok = checks.pg && (checks.nats \|\| !NATS_REQUIRED)`; `degraded = !checks.nats \|\| !checks.jetstream` |
 
 Additional rules:
 - A domain "not found" is thrown as `NotFoundError` and mapped by `handleRouteError()` to 404. Other errors (DB, bugs) bubble to the error middleware → `500 { "error": "internal error" }`.

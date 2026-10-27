@@ -119,12 +119,13 @@ SQL
 
 ### 2.3 Sesuaikan `.env` (base-api)
 
-File `.env` di `express-modular-sample/` menentukan koneksi. Untuk lokal:
+File `.env` di `express-modular-sample/` menentukan koneksi. Untuk lokal (salin dari `.env.example`):
 
 ```dotenv
 PORT=3000
 NODE_ENV=development
 LOG_LEVEL=debug
+TRUST_PROXY=false
 
 # PostgreSQL — WAJIB
 PG_HOST=localhost
@@ -138,7 +139,9 @@ NATS_SERVERS=nats://localhost:4222
 NATS_REQUIRED=false
 ```
 
-Variabel lain (`WS_HEARTBEAT_MS`, `SCHEDULER_ENABLED`, dst.) bisa dilihat di `.env` atau `src/libs/config.js`.
+`TRUST_PROXY=true` hanya dipakai jika aplikasi berada di belakang reverse proxy tepercaya; default `false`. Nilai ini memengaruhi `req.ip` yang dipakai rate limit.
+
+Variabel lain (`WS_HEARTBEAT_MS`, `SCHEDULER_ENABLED`, dst.) bisa dilihat di `.env.example` atau `src/libs/config.js`.
 
 ### 2.4 Perintah bootstrap
 
@@ -201,7 +204,7 @@ Saat start, aplikasi mencetak **route table**. Inilah peta seluruh endpoint hasi
 
 ```bash
 curl -s http://localhost:3000/health
-# {"ok":true,"degraded":false,"checks":{"pg":true,"nats":true,"ws":true},"uptimeSec":3}
+# {"ok":true,"degraded":false,"checks":{"pg":true,"nats":true,"jetstream":true,"ws":true},"uptimeSec":3}
 
 curl -s http://localhost:3000/users/1
 # {"id":1,"name":"Alice","roles":["admin"],"enriched":true}
@@ -232,8 +235,8 @@ Response `/users/1` punya `enriched` dan `roles` — itu bukti extension ikut be
 ### 3.1 Perintah
 
 ```bash
-npm run poc:copy   # WAJIB dulu — test butuh src/extensions/
-npm test           # node --test "test/**/*.test.js"
+node scripts/copy-extensions.js   # WAJIB dulu — test butuh src/extensions/
+npm test                          # node --test "test/**/*.test.js"
 ```
 
 Output yang diharapkan (ringkas):
@@ -241,8 +244,8 @@ Output yang diharapkan (ringkas):
 ```text
 ok 1 - repositories/services use $1 placeholders and extract rows
 ...
-ok 40 - rate limit rejects requests over the limit and resets after the window
-# tests 40
+ok 43 - rate limit rejects requests over the limit and resets after the window
+# tests 43
 # pass 40
 # fail 0
 ```
@@ -302,7 +305,7 @@ test("GET /users", async () => {
 
 ### Checklist
 
-- [ ] `npm test` hijau (40/40)
+- [ ] `npm test` hijau (43/43)
 - [ ] Paham beda `installFakeDeps` (unit-level) vs `buildTestApp` (HTTP-level)
 - [ ] Tahu kenapa `poc:copy` harus dijalankan sebelum test
 

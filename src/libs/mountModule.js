@@ -1,6 +1,6 @@
 import express from "express";
 import { createRouter } from "./routeCollector.js";
-import { mergeRoutes } from "./mergeRoutes.js";
+import { isLikelyMiddleware, mergeRoutes } from "./mergeRoutes.js";
 import { sortRoutes } from "./routeOrder.js";
 
 export function mountModule(app, { name, prefix, routeGroups }) {
@@ -33,6 +33,15 @@ export function mountModule(app, { name, prefix, routeGroups }) {
 
     const mode = rt.opts?._mode ? ` [${rt.opts._mode}]` : "";
     const shownPath = `${prefix}${rt.path === "/" ? "" : rt.path}`;
+    const terminal = rt.handlers.at(-1);
+
+    if (isLikelyMiddleware(terminal)) {
+      console.warn(
+        `      ⚠ ${rt.method.toUpperCase()} ${shownPath} terminal handler ` +
+          `looks like middleware (arity ${terminal.length}) — request may hang`,
+      );
+    }
+
     console.log(
       `      [${rt.groupName}] ${rt.method.toUpperCase().padEnd(7)} ${shownPath}${mode}`,
     );

@@ -2,8 +2,16 @@ function key(rt) {
   return `${rt.method} ${rt.path}`;
 }
 
+export function isLikelyMiddleware(fn) {
+  return typeof fn === "function" && fn.length >= 3;
+}
+
 function applyExtend(base, ext) {
-  const { prepend = [], mergeMiddleware = false } = ext.opts || {};
+  const {
+    prepend = [],
+    mergeMiddleware = false,
+    keepBaseHandler = false,
+  } = ext.opts || {};
 
   const baseMw = base.handlers.slice(0, -1);
   const baseTerminal = base.handlers.slice(-1);
@@ -13,6 +21,22 @@ function applyExtend(base, ext) {
   const terminal = extTerminal.length ? extTerminal : baseTerminal;
 
   const hasPrepend = Array.isArray(prepend) && prepend.length > 0;
+
+  if (mergeMiddleware && keepBaseHandler) {
+    return {
+      ...ext,
+      handlers: [
+        ...(hasPrepend ? prepend : []),
+        ...baseMw,
+        ...ext.handlers,
+        ...baseTerminal,
+      ],
+      opts: {
+        ...ext.opts,
+        _mode: hasPrepend ? "prepend+merge+keep" : "merge+keep",
+      },
+    };
+  }
 
   if (!hasPrepend && !mergeMiddleware) {
     return { ...ext, opts: { ...ext.opts, _mode: "overwrite" } };

@@ -1,4 +1,5 @@
 import policyService from "../services/service.policy.js";
+import { handleRouteError } from "../../../libs/errors.js";
 
 export default function registerPolicy(r) {
   r.get("/policies", async (req, res) => {
@@ -9,7 +10,7 @@ export default function registerPolicy(r) {
     try {
       res.json(await policyService.get(req.params.id));
     } catch (e) {
-      res.status(404).json({ error: e.message });
+      handleRouteError(res, e);
     }
   });
 }

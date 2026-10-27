@@ -190,6 +190,7 @@ async function main() {
     const checks = {
       pg: false,
       nats: false,
+      jetstream: false,
       ws: false,
     };
 
@@ -198,6 +199,11 @@ async function main() {
     } catch {}
     try {
       checks.nats = await nats.healthCheck();
+    } catch {}
+    try {
+      checks.jetstream = config.nats.jetstream
+        ? nats.jetstreamAvailable()
+        : true;
     } catch {}
     try {
       checks.ws = await ws.healthCheck();

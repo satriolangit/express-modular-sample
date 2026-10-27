@@ -355,6 +355,10 @@ export function healthCheck() {
   return isAvailable();
 }
 
+export function jetstreamAvailable() {
+  return isAvailable() && Boolean(ctx?.js);
+}
+
 export async function close() {
   intentionalClose = true;
   stopBackgroundRetry();

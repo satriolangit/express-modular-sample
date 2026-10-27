@@ -4,15 +4,25 @@ import { computeHealth } from "../src/libs/health.js";
 
 test("optional NATS failure keeps readiness true and reports degraded", () => {
   const result = computeHealth(
-    { pg: true, nats: false, ws: true },
+    { pg: true, nats: false, jetstream: true, ws: true },
     { natsRequired: false },
   );
 
   assert.deepEqual(result, {
     ok: true,
     degraded: true,
-    checks: { pg: true, nats: false, ws: true },
+    checks: { pg: true, nats: false, jetstream: true, ws: true },
   });
+});
+
+test("JetStream outage is degraded but not unready", () => {
+  const result = computeHealth(
+    { pg: true, nats: true, jetstream: false, ws: true },
+    { natsRequired: false },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.degraded, true);
 });
 
 test("required NATS failure fails readiness", () => {

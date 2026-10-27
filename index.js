@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import express from "express";
 
-import config from "./src/libs/config.js";
+import config, { assertRequiredConfig } from "./src/libs/config.js";
 import logger from "./src/libs/logger.js";
 import * as nats from "./src/libs/nats.js";
 import * as db from "./src/libs/db.js";
@@ -22,6 +22,13 @@ async function main() {
     app: config.appName,
     env: config.env,
   });
+
+  try {
+    assertRequiredConfig();
+  } catch (err) {
+    logger.error("invalid configuration", { error: err.message });
+    process.exit(1);
+  }
 
   // ────────────────────────────────────────────────
   // NATS (async — must await connect)

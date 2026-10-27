@@ -4,11 +4,19 @@ src/extensions/
 .package-merge-report.json
 package-lock.json
 package.json
+
+# Local secrets — never commit
+.env
+.env.*
+!.env.example
+
 .claude/
 .gitnexus/
 .CLAUDE.md
 .AGENTS.md
 .docs/
+AGENTS.md
+CLAUDE.md
 
 # Agent-workflow docs (superpowers plans/specs) — not part of the product.
 superpowers/

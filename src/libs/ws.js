@@ -16,44 +16,52 @@ export function init(httpServer) {
 
   // ── Manual upgrade routing ─────────────────────────
   httpServer.on("upgrade", (req, socket, head) => {
-    const pathname = new URL(req.url, `http://${req.headers.host || "x"}`)
-      .pathname;
-    const entry = channels.get(pathname);
+    try {
+      const pathname = new URL(req.url, `http://${req.headers.host || "x"}`)
+        .pathname;
+      const entry = channels.get(pathname);
 
-    if (!entry) {
-      logger.warn("[ws] upgrade to unknown path", { path: pathname });
-      socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
-      socket.destroy();
-      return;
-    }
-
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.__path = pathname;
-      ws.__owner = entry.owner;
-
-      // ── Heartbeat setup ────────────────────────────
-      heartbeats.set(ws, { isAlive: true });
-      ws.on("pong", () => {
-        heartbeats.set(ws, { isAlive: true });
-      });
-
-      ws.on("error", (err) => {
-        logger.error("[ws] socket error", {
-          path: pathname,
-          error: err.message,
-        });
-      });
-
-      try {
-        entry.handler(ws, req);
-      } catch (err) {
-        logger.error("[ws] handler threw", {
-          path: pathname,
-          error: err.message,
-        });
-        ws.close(1011, "handler error");
+      if (!entry) {
+        logger.warn("[ws] upgrade to unknown path", { path: pathname });
+        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+        socket.destroy();
+        return;
       }
-    });
+
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.__path = pathname;
+        ws.__owner = entry.owner;
+
+        // ── Heartbeat setup ────────────────────────────
+        heartbeats.set(ws, { isAlive: true });
+        ws.on("pong", () => {
+          heartbeats.set(ws, { isAlive: true });
+        });
+
+        ws.on("error", (err) => {
+          logger.error("[ws] socket error", {
+            path: pathname,
+            error: err.message,
+          });
+        });
+
+        try {
+          entry.handler(ws, req);
+        } catch (err) {
+          logger.error("[ws] handler threw", {
+            path: pathname,
+            error: err.message,
+          });
+          ws.close(1011, "handler error");
+        }
+      });
+    } catch (err) {
+      logger.warn("[ws] invalid upgrade request", { error: err.message });
+      try {
+        socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      } catch {}
+      socket.destroy();
+    }
   });
 
   // ── Global heartbeat interval ──────────────────────

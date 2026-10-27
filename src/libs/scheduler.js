@@ -98,13 +98,8 @@ export function register({
     meta: { name, schedule, timezone: tz, owner, runOnInit: !!runOnInit },
     state,
     handler,
+    runOnce,
   });
-
-  if (runOnInit) {
-    setImmediate(() => {
-      runOnce();
-    });
-  }
 
   logger.debug("[scheduler] registered", {
     name,
@@ -133,6 +128,13 @@ export function startAll() {
       timezone: entry.meta.timezone,
       owner: entry.meta.owner,
     });
+
+    if (entry.meta.runOnInit && !entry.meta.runOnInitDone) {
+      entry.meta.runOnInitDone = true;
+      setImmediate(() => {
+        entry.runOnce();
+      });
+    }
   }
 }
 
@@ -164,7 +166,10 @@ export async function stopAll({ waitMs = 10_000 } = {}) {
 export function destroyAll() {
   for (const entry of tasks.values()) {
     try {
-      entry.task.destroy();
+      entry.task.stop();
+    } catch {}
+    try {
+      entry.task.destroy?.();
     } catch {}
   }
   tasks.clear();

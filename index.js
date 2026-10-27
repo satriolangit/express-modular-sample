@@ -166,11 +166,6 @@ async function main() {
   }
 
   // ────────────────────────────────────────────────
-  // START SCHEDULED TASKS
-  // ────────────────────────────────────────────────
-  scheduler.startAll();
-
-  // ────────────────────────────────────────────────
   // MOUNT ROUTES
   // ────────────────────────────────────────────────
   for (const mod of modules.values()) {
@@ -249,6 +244,13 @@ async function main() {
   httpServer.listen(config.http.port, () => {
     logger.info(`http://localhost:${config.http.port}`);
     logger.info(`ws available on registered paths`);
+
+    try {
+      scheduler.startAll();
+    } catch (err) {
+      logger.error("scheduler start failed", { error: err.message });
+      process.exit(1);
+    }
   });
 }
 

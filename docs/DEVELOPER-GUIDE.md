@@ -140,7 +140,7 @@ NATS_REQUIRED=false
 
 Variabel lain (`WS_HEARTBEAT_MS`, `SCHEDULER_ENABLED`, dst.) bisa dilihat di `.env` atau `src/libs/config.js`.
 
-### 2.4 Empat perintah inti
+### 2.4 Perintah bootstrap
 
 ```mermaid
 flowchart LR
@@ -152,11 +152,13 @@ flowchart LR
 ```bash
 cd express-modular-sample
 
-npm run poc:copy     # 1. salin isi extension-api/src → src/extensions/
-npm run merge:ext    # 2. generate package.json dari package.base.json + extension
-npm install          # 3. install dependency (pertama kali / setelah dependency berubah)
-npm start            # 4. jalankan
+node scripts/copy-extensions.js   # 1. salin isi extension-api/src → src/extensions/
+node scripts/merge-package.js     # 2. generate package.json dari package.base.json + extension
+npm install                       # 3. install dependency (pertama kali / setelah dependency berubah)
+npm start                         # 4. jalankan
 ```
+
+> `package.json` adalah file generated dan tidak di-track. Pada clone baru, jalankan dua perintah `node scripts/...` di atas (atau `./run-poc.sh`) sebelum `npm install`/`npm test`.
 
 Contoh output yang benar:
 

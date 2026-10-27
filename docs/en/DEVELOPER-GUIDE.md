@@ -140,7 +140,7 @@ NATS_REQUIRED=false
 
 Other variables (`WS_HEARTBEAT_MS`, `SCHEDULER_ENABLED`, etc.) can be found in `.env` or `src/libs/config.js`.
 
-### 2.4 The four core commands
+### 2.4 Bootstrap commands
 
 ```mermaid
 flowchart LR
@@ -152,11 +152,13 @@ flowchart LR
 ```bash
 cd express-modular-sample
 
-npm run poc:copy     # 1. copy extension-api/src contents → src/extensions/
-npm run merge:ext    # 2. generate package.json from package.base.json + extension
-npm install          # 3. install dependencies (first time / after dependencies change)
-npm start            # 4. run
+node scripts/copy-extensions.js   # 1. copy extension-api/src contents → src/extensions/
+node scripts/merge-package.js     # 2. generate package.json from package.base.json + extension
+npm install                       # 3. install dependencies (first time / after dependencies change)
+npm start                         # 4. run
 ```
+
+> `package.json` is generated and not tracked. On a fresh clone, run the two `node scripts/...` commands above (or `./run-poc.sh`) before `npm install`/`npm test`.
 
 Example of correct output:
 

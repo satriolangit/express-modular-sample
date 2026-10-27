@@ -23,11 +23,11 @@ docker run --name pg-poc -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=arsi_system_db
 
 # 2. Sesuaikan .env (PG_HOST=localhost, PG_PASSWORD=pass, dst.)
 
-# 3. Empat perintah inti
-npm run poc:copy    # salin extension → src/extensions/
-npm run merge:ext   # generate package.json gabungan
+# 3. Bootstrap — package.json is generated and not tracked
+node scripts/copy-extensions.js   # salin extension → src/extensions/
+node scripts/merge-package.js     # generate package.json gabungan
 npm install
-npm start           # cek route table di terminal
+npm start                         # cek route table di terminal
 
 # 4. Verifikasi
 curl -s http://localhost:3000/health
@@ -39,8 +39,8 @@ Ingin NATS juga? `docker run --name nats-poc -p 4222:4222 -d nats:latest -js` (t
 ## Test
 
 ```bash
-npm run poc:copy   # wajib — test memakai src/extensions/
-npm test           # node --test "test/**/*.test.js"
+node scripts/copy-extensions.js   # wajib — test memakai src/extensions/
+npm test                          # node --test "test/**/*.test.js"
 ```
 
 ## Struktur Singkat

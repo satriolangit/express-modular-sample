@@ -144,7 +144,7 @@ Other variables (`WS_HEARTBEAT_MS`, `SCHEDULER_ENABLED`, etc.) can be found in `
 
 ```mermaid
 flowchart LR
-    A["npm run poc:copy<br/>copy extension → src/extensions/"] --> B["npm run merge:ext<br/>generate merged package.json"]
+    A["node scripts/copy-extensions.js<br/>copy extension → src/extensions/"] --> B["node scripts/merge-package.js<br/>generate merged package.json"]
     B --> C["npm install<br/>install dependencies"]
     C --> D["npm start<br/>run the application"]
 ```
@@ -175,30 +175,25 @@ On startup, the application prints the **route table**. It is the map of every e
 
 ```text
   Module: audit-user  →  /audit
-    [audit]
-      GET     /audit/logs
-      GET     /audit/users/:id
-      POST    /audit/log
-      POST    /audit/notify
+      [audit] GET     /audit/logs
+      [audit] POST    /audit/log
+      [audit] POST    /audit/notify
+      [audit] GET     /audit/users/:id
   ✓ 4 routes mounted
 
   Module: product-management  →  /products
-    [policy]
-      GET     /products/policies
-      GET     /products/policies/:id
-      POST    /products/policies [new]
-    [product]
-      GET     /products
-      GET     /products/:id [overwrite]
+      [policy] GET     /products/policies
+      [policy] POST    /products/policies [new]
+      [policy] GET     /products/policies/:id
+      [product] GET     /products
+      [product] GET     /products/:id [overwrite]
   ✓ 5 routes mounted
 
   Module: user-management  →  /users
-    [role]
-      GET     /users/roles
-    [user]
-      GET     /users
-      GET     /users/:id [overwrite]
-      DELETE  /users/:id [new]
+      [role] GET     /users/roles
+      [user] GET     /users
+      [user] GET     /users/:id [overwrite]
+      [user] DELETE  /users/:id [new]
   ✓ 4 routes mounted
 ```
 
@@ -206,7 +201,7 @@ On startup, the application prints the **route table**. It is the map of every e
 
 ```bash
 curl -s http://localhost:3000/health
-# {"ok":true,"uptimeSec":3,"checks":{"pg":true,"nats":true,"ws":true}}
+# {"ok":true,"degraded":false,"checks":{"pg":true,"nats":true,"ws":true},"uptimeSec":3}
 
 curl -s http://localhost:3000/users/1
 # {"id":1,"name":"Alice","roles":["admin"],"enriched":true}
@@ -245,11 +240,10 @@ Expected output (abridged):
 
 ```text
 ok 1 - repositories/services use $1 placeholders and extract rows
-ok 2 - buildInsertSQL generates parameterized INSERT with RETURNING
-ok 3 - base + extension routes respond correctly
-ok 4 - async db errors become JSON 500 instead of hanging
-# tests 4
-# pass 4
+...
+ok 40 - rate limit rejects requests over the limit and resets after the window
+# tests 40
+# pass 40
 # fail 0
 ```
 
@@ -308,7 +302,7 @@ test("GET /users", async () => {
 
 ### Checklist
 
-- [ ] `npm test` is green (4/4)
+- [ ] `npm test` is green (40/40)
 - [ ] You understand the difference between `installFakeDeps` (unit-level) and `buildTestApp` (HTTP-level)
 - [ ] You know why `poc:copy` must be run before tests
 
@@ -658,6 +652,13 @@ r.get("/products-custom", { mergeMiddleware: true }, mw.requestLogger, handler);
 
 The resulting rule: `middlewareBase → middlewareExtension → handler`. Important note: **the last handler is still treated as terminal**. If the base route contains only one handler (like every route in this sample), `mergeMiddleware` ends up behaving like overwrite unless you include a terminal handler in the extension. For this sample, `prepend` is more practical. Details: [CONTRACT §3](./CONTRACT.md#3-route-merge-contract).
 
+If the extension contains only middleware and the base handler must stay in use, add `keepBaseHandler: true`:
+
+```js
+r.get("/", { mergeMiddleware: true, keepBaseHandler: true }, mw.requestLogger);
+// result: handlerBase remains the terminal
+```
+
 ### 6.4 New route — an endpoint that doesn't exist in the base
 
 ```js
@@ -934,7 +935,7 @@ For a quick exercise, change the schedule to `* * * * *` (every minute) and wait
 
 | Option | Function |
 | --- | --- |
-| `runOnInit: true` | Run once at startup |
+| `runOnInit: true` | Run once during `startAll()`, after `listen` |
 | `timezone: "Asia/Jakarta"` | Override the timezone (default UTC) |
 
 A task that is still running when the next tick arrives is automatically skipped (with a warning) — your handler design must support this.
@@ -971,6 +972,7 @@ A task that is still running when the next tick arrives is automatically skipped
 | Symptom | Common cause | Fix |
 | --- | --- | --- |
 | Boot stops with `postgres unreachable` | PostgreSQL is down / wrong `.env` | Start PG, check `PG_HOST/PG_PORT` |
+| Boot stops with `Missing required env: PG_...` | `.env` is incomplete | Copy `.env.example` to `.env` and fill in the values |
 | Log `[nats] initial connect failed — degraded mode` | NATS is not running | Normal for the POC — run NATS if you need event features |
 | `EADDRINUSE :::3000` | Port is already used by another process | Kill the old process or change `PORT` |
 | `WS path already registered: /ws/x` | Two modules use the same WS path | Change the path using the module namespace |
@@ -1015,6 +1017,8 @@ Every request log carries a `reqId`. If there's an error, look for the same `req
 ## 11. Cheat Sheet & Exercise Index
 
 ### Commands
+
+> Fresh clone: `package.json` does not exist yet. Run `node scripts/copy-extensions.js && node scripts/merge-package.js` first, then the npm commands below.
 
 ```bash
 npm run poc:copy     # copy extension → src/extensions/

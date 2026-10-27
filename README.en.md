@@ -7,7 +7,7 @@ The core application (*base*) of the modular base + extension architecture: one 
 - **Runtime:** Node.js ≥ 20.11 (22 recommended), ESM (`"type": "module"`)
 - **HTTP:** Express 5
 - **Infra:** PostgreSQL (required), NATS + JetStream (optional), WebSocket, node-cron
-- **Tests:** `node:test` + fake deps — no database needed (4/4 passing)
+- **Tests:** `node:test` + fake deps — no database needed (40/40 passing)
 - **Status:** POC / starter — see [limitations](docs/en/ARCHITECTURE.md#9-current-design-limitations-poc)
 
 ## Quickstart (5 minutes)
@@ -21,7 +21,7 @@ The core application (*base*) of the modular base + extension architecture: one 
 # 1. Set up PostgreSQL (example via Docker) — the app refuses to start without it
 docker run --name pg-poc -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=arsi_system_db -p 5432:5432 -d postgres:16
 
-# 2. Adjust .env (PG_HOST=localhost, PG_PASSWORD=pass, etc.)
+# 2. Copy .env.example → .env, then adjust it (PG_HOST=localhost, PG_PASSWORD=pass, etc.)
 
 # 3. Bootstrap — package.json is generated and not tracked
 node scripts/copy-extensions.js   # copy extension → src/extensions/
@@ -77,3 +77,5 @@ Versi Bahasa Indonesia: [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) · [d
 | `npm run poc:copy` | Copy the extension into `src/extensions/` |
 | `npm run merge:ext` | Generate `package.json` from `package.base.json` + extension |
 | `npm run merge:ext:dry` | Preview the merge without writing files |
+
+> On a fresh clone, run `node scripts/copy-extensions.js` and `node scripts/merge-package.js` first; `npm run ...` commands are available after `package.json` is generated.

@@ -144,7 +144,7 @@ Variabel lain (`WS_HEARTBEAT_MS`, `SCHEDULER_ENABLED`, dst.) bisa dilihat di `.e
 
 ```mermaid
 flowchart LR
-    A["npm run poc:copy<br/>salin extension → src/extensions/"] --> B["npm run merge:ext<br/>generate package.json gabungan"]
+    A["node scripts/copy-extensions.js<br/>salin extension → src/extensions/"] --> B["node scripts/merge-package.js<br/>generate package.json gabungan"]
     B --> C["npm install<br/>install dependency"]
     C --> D["npm start<br/>jalankan aplikasi"]
 ```
@@ -175,30 +175,25 @@ Saat start, aplikasi mencetak **route table**. Inilah peta seluruh endpoint hasi
 
 ```text
   Module: audit-user  →  /audit
-    [audit]
-      GET     /audit/logs
-      GET     /audit/users/:id
-      POST    /audit/log
-      POST    /audit/notify
+      [audit] GET     /audit/logs
+      [audit] POST    /audit/log
+      [audit] POST    /audit/notify
+      [audit] GET     /audit/users/:id
   ✓ 4 routes mounted
 
   Module: product-management  →  /products
-    [policy]
-      GET     /products/policies
-      GET     /products/policies/:id
-      POST    /products/policies [new]
-    [product]
-      GET     /products
-      GET     /products/:id [overwrite]
+      [policy] GET     /products/policies
+      [policy] POST    /products/policies [new]
+      [policy] GET     /products/policies/:id
+      [product] GET     /products
+      [product] GET     /products/:id [overwrite]
   ✓ 5 routes mounted
 
   Module: user-management  →  /users
-    [role]
-      GET     /users/roles
-    [user]
-      GET     /users
-      GET     /users/:id [overwrite]
-      DELETE  /users/:id [new]
+      [role] GET     /users/roles
+      [user] GET     /users
+      [user] GET     /users/:id [overwrite]
+      [user] DELETE  /users/:id [new]
   ✓ 4 routes mounted
 ```
 
@@ -206,7 +201,7 @@ Saat start, aplikasi mencetak **route table**. Inilah peta seluruh endpoint hasi
 
 ```bash
 curl -s http://localhost:3000/health
-# {"ok":true,"uptimeSec":3,"checks":{"pg":true,"nats":true,"ws":true}}
+# {"ok":true,"degraded":false,"checks":{"pg":true,"nats":true,"ws":true},"uptimeSec":3}
 
 curl -s http://localhost:3000/users/1
 # {"id":1,"name":"Alice","roles":["admin"],"enriched":true}
@@ -245,11 +240,10 @@ Output yang diharapkan (ringkas):
 
 ```text
 ok 1 - repositories/services use $1 placeholders and extract rows
-ok 2 - buildInsertSQL generates parameterized INSERT with RETURNING
-ok 3 - base + extension routes respond correctly
-ok 4 - async db errors become JSON 500 instead of hanging
-# tests 4
-# pass 4
+...
+ok 40 - rate limit rejects requests over the limit and resets after the window
+# tests 40
+# pass 40
 # fail 0
 ```
 
@@ -308,7 +302,7 @@ test("GET /users", async () => {
 
 ### Checklist
 
-- [ ] `npm test` hijau (4/4)
+- [ ] `npm test` hijau (40/40)
 - [ ] Paham beda `installFakeDeps` (unit-level) vs `buildTestApp` (HTTP-level)
 - [ ] Tahu kenapa `poc:copy` harus dijalankan sebelum test
 
@@ -658,6 +652,13 @@ r.get("/products-anda", { mergeMiddleware: true }, mw.requestLogger, handler);
 
 Aturan hasilnya: `middlewareBase → middlewareExtension → handler`. Catatan penting: **handler terakhir tetap dianggap terminal**. Kalau route base hanya berisi satu handler (seperti semua route di sample ini), `mergeMiddleware` akan berakhir seperti overwrite kecuali Anda menyertakan handler terminal di extension. Untuk sample ini, `prepend` lebih praktis. Detail: [CONTRACT §3](./CONTRACT.md#3-route-merge-contract).
 
+Jika extension hanya berisi middleware dan handler base harus tetap dipakai, tambahkan `keepBaseHandler: true`:
+
+```js
+r.get("/", { mergeMiddleware: true, keepBaseHandler: true }, mw.requestLogger);
+// hasil: handlerBase tetap menjadi terminal
+```
+
 ### 6.4 Route baru — endpoint yang tidak ada di base
 
 ```js
@@ -934,7 +935,7 @@ Untuk latihan cepat, ubah schedule ke `* * * * *` (tiap menit) dan tunggu log `[
 
 | Opsi | Fungsi |
 | --- | --- |
-| `runOnInit: true` | Jalankan sekali saat startup |
+| `runOnInit: true` | Jalankan sekali saat `startAll()` setelah `listen` |
 | `timezone: "Asia/Jakarta"` | Override timezone (default UTC) |
 
 Task yang masih berjalan saat tick berikutnya tiba otomatis di-skip (dengan warning) — desain handler harus mendukung ini.
@@ -971,6 +972,7 @@ Task yang masih berjalan saat tick berikutnya tiba otomatis di-skip (dengan warn
 | Gejala | Penyebab umum | Solusi |
 | --- | --- | --- |
 | Boot berhenti dengan `postgres unreachable` | PostgreSQL mati / `.env` salah | Nyalakan PG, cek `PG_HOST/PG_PORT` |
+| Boot berhenti dengan `Missing required env: PG_...` | `.env` belum diisi | Salin `.env.example` ke `.env` dan isi nilainya |
 | Log `[nats] initial connect failed — degraded mode` | NATS tidak jalan | Normal untuk POC — jalankan NATS bila butuh fitur event |
 | `EADDRINUSE :::3000` | Port sudah dipakai proses lain | Matikan proses lama atau ganti `PORT` |
 | `WS path already registered: /ws/x` | Dua module memakai path WS sama | Ganti path dengan namespace module |
@@ -1015,6 +1017,8 @@ Semua log request membawa `reqId`. Kalau ada error, cari `reqId` yang sama di ba
 ## 11. Cheat Sheet & Daftar Latihan
 
 ### Perintah
+
+> Fresh clone: `package.json` belum ada. Jalankan `node scripts/copy-extensions.js && node scripts/merge-package.js` dulu, baru perintah npm di bawah.
 
 ```bash
 npm run poc:copy     # salin extension → src/extensions/

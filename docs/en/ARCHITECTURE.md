@@ -74,6 +74,7 @@ express-modular-sample/
 ├── index.js                     # entry point: the whole bootstrap
 ├── package.base.json            # source of truth for dependencies & scripts
 ├── package.json                 # GENERATED — do not edit manually
+├── .env.example                 # env template; copy to .env
 ├── scripts/
 │   ├── merge-package.js         # merge package.base.json + extension
 │   └── copy-extensions.js       # copy extension-api/src → src/extensions/
@@ -83,10 +84,13 @@ express-modular-sample/
 │   │   ├── logger.js            # Winston
 │   │   ├── deps.js              # dependency bag (live bindings)
 │   │   ├── db.js                # PostgreSQL pool + query/tx/insert
+│   │   ├── errors.js            # domain errors + route error mapping
+│   │   ├── health.js            # readiness computation
 │   │   ├── nats.js              # NATS + JetStream + reconnection
 │   │   ├── ws.js                # WebSocket server + channel registry
 │   │   ├── scheduler.js         # cron tasks
 │   │   ├── routeCollector.js    # fake "router" that collects route definitions
+│   │   ├── routeOrder.js        # deterministic route sort (static first)
 │   │   ├── mergeRoutes.js       # merge engine base + extension
 │   │   ├── mountModule.js       # mount the merge result onto Express
 │   │   └── bootstrap/discover.js# scan folder → list of modules
@@ -166,15 +170,17 @@ sequenceDiagram
     IX->>APP: mount /health + error middleware
     IX->>IX: setupShutdown() — SIGTERM/SIGINT handlers
     IX->>APP: httpServer.listen(config.http.port)
+    IX->>IX: scheduler.startAll() — after listen
 ```
 
 Key points beginners often ask about:
 
 1. **`import "dotenv/config"` must run first** so that `process.env` is already populated when `config.js` is evaluated. That is why it is written on the first line of `index.js`.
-2. **NATS is optional, PostgreSQL is required.** If NATS is unavailable, the application still runs in *degraded mode* (NATS-based features are dead, the rest live). If PostgreSQL is unavailable, the application refuses to start.
+2. **NATS is optional, PostgreSQL is required.** If NATS is unavailable, the application still runs in *degraded mode* (NATS-based features are dead, the rest live). JetStream is also optional: if the NATS server is up but JetStream is disabled, the app still boots without JetStream features. If PostgreSQL is unavailable, the application refuses to start.
 3. **`populate(deps)` happens BEFORE `discover()`.** Modules are loaded dynamically by `discover()`; at that moment they read `deps`. Getting this order wrong is the classic cause of the `Cannot read properties of null` error.
 4. **Module init order follows folder name (alphabetical)** — `audit-user` → `product-management` → `user-management`. Do not rely on this order for dependencies between modules.
 5. **Routes are mounted last**, after all init hooks. So even if an init hook throws an error, the app exits immediately and never receives half-ready traffic.
+6. **The scheduler starts after `listen`**, so `runOnInit` tasks do not run before the server is ready to accept traffic.
 
 ---
 
@@ -223,7 +229,7 @@ The end result is a `Map` containing each module's descriptor:
 
 ### 4.3 Merge Engine (`src/libs/mergeRoutes.js`)
 
-Base routes and extension routes are matched by the key `"<method> <path>"`. Four merge modes:
+Base routes and extension routes are matched by the key `"<method> <path>"`. Merge modes:
 
 ```mermaid
 flowchart TD
@@ -241,26 +247,25 @@ Rules to understand:
 - **The last handler** in a route definition is treated as the *terminal handler* (the one that sends the response); the rest are treated as *middleware*.
 - `prepend` inserts middleware **before** all base middleware.
 - `mergeMiddleware: true` inserts extension middleware **after** base middleware (still before the handler).
+- `keepBaseHandler: true` (with `mergeMiddleware`) treats all extension handlers as middleware and keeps the base terminal — mode `merge+keep`.
 - With no options → **overwrite**: the extension handler replaces the base handler entirely.
 - An extension route with no match in the base → `_mode: "new"`.
 
 Example from the sample repo (see the route table printed at startup):
 
 ```text
-Module: user-management  →  /users
-    [role]
-      GET     /users/roles
-    [user]
-      GET     /users
-      GET     /users/:id [overwrite]     ← route.user.extend.js overrides GET /users/:id
-      DELETE  /users/:id [new]           ← new route from the extension
+  Module: user-management  →  /users
+      [role] GET     /users/roles
+      [user] GET     /users
+      [user] GET     /users/:id [overwrite]     ← route.user.extend.js overrides GET /users/:id
+      [user] DELETE  /users/:id [new]           ← new route from the extension
 ```
 
 ### 4.4 Mount (`src/libs/mountModule.js`)
 
-The final stage: the merge result is mounted onto one `express.Router()` per module, then that router is `app.use(prefix, router)`-ed. Every mounted route is printed to the console so developers can immediately see which merge mode was applied.
+The final stage: the merge result is mounted onto one `express.Router()` per module, then that router is `app.use(prefix, router)`-ed. `mountModule` flattens all groups and sorts routes by specificity: static segments first, then parameters, wildcards, and method `all` last. File read order no longer decides which route wins. Every mounted route is printed to the console so developers can immediately see which merge mode was applied.
 
-> ⚠️ Because Express matches routes **in order** (first match), route order matters. Details and the rules are in [CONTRACT.md §3](./CONTRACT.md#3-route-merge-contract).
+> ⚠️ Because Express matches routes **in order** (first match), this sorter matters: it prevents a static route such as `/roles` from being swallowed by `/:id`. Details and the rules are in [CONTRACT.md §3](./CONTRACT.md#3-route-merge-contract).
 
 ---
 
@@ -305,7 +310,7 @@ The application layers:
 | Service | Business logic, rules, orchestration | `service.user.js` |
 | Repository | Database access (SQL) | `repo.user.js` |
 
-**Error handling:** Express 5 automatically forwards errors from `async` handlers to the global error middleware (even without `try/catch`, it will not hang). The error middleware logs and sends `500 { "error": "internal error" }`. Routes that have a "not found" scenario still handle it themselves and return `404 { "error": "User not found" }`.
+**Error handling:** Express 5 automatically forwards errors from `async` handlers to the global error middleware (even without `try/catch`, it will not hang). The error middleware logs and sends `500 { "error": "internal error" }`. Routes that have a "not found" scenario throw `NotFoundError` and map it via `handleRouteError()` to `404 { "error": "User not found" }`; DB errors are no longer turned into 404s.
 
 ---
 
@@ -330,7 +335,7 @@ The complete rules are in [CONTRACT.md §4](./CONTRACT.md#4-deps-contract).
 
 - `getPool()` — creates a `pg.Pool` the first time it is called (lazy), with max connections, idle timeout, and connection timeout from config.
 - `query(sql, params)` — a `pool.query` wrapper with duration + rowCount logging; errors are re-thrown after being logged.
-- `tx(fn)` — transaction: `BEGIN` → `fn(client)` → `COMMIT`, `ROLLBACK` on error, `client.release()` always.
+- `tx(fn)` — transaction: `BEGIN` → `fn(client)` → `COMMIT`, `ROLLBACK` on error, `client.release()` always. If `ROLLBACK` itself fails, the original error is still thrown and the rollback failure is logged.
 - `insert(table, row)` — dynamic insert helper: columns are taken from the object keys, values are parameterized (`$1, $2, ...`), table/column names are validated with an identifier regex (preventing SQL injection through column names), and it returns the resulting row (`RETURNING *`).
 - `healthCheck()` — `SELECT 1`, used during bootstrap and by the `/health` endpoint.
 
@@ -361,6 +366,8 @@ Callbacks provided:
 
 **Why is the re-subscribe pattern important?** After a reconnect via background retry, the old subscriptions have died together with the old connection. That is why every module registers an idempotent `setup()` function with `onConnected` — the full pattern is in [CONTRACT.md §6](./CONTRACT.md#6-nats-contract) and the tutorial is in [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md).
 
+**JetStream is optional.** If the NATS server is up but JetStream is disabled, `initJetStream()` catches the error, `js`/`jsm` become `null`, and the app still boots in degraded mode. Background retry after a permanent connection loss only runs when `NATS_AUTO_RETRY_AFTER_EXHAUST=true` (default `false`).
+
 Two publish modes:
 - `publish(subject, payload)` — core NATS, fire-and-forget, returns `false` if unavailable.
 - `jsPublish(subject, payload)` — JetStream, gets an acknowledgment, returns `null` on failure.
@@ -371,6 +378,7 @@ A single `WebSocketServer` with `noServer: true`; routing is done manually based
 
 - `register(path, handler, { owner })` — register a channel. **Throws if the path is already registered** (prevents clashes between modules).
 - An upgrade request to an unknown path → `404` and the socket is destroyed.
+- A malformed upgrade request (e.g. invalid URL) → `400` and the socket is destroyed; the process stays alive.
 - Heartbeat: every `WS_HEARTBEAT_MS` (default 30 s) the server sends a `ping`; a client that does not reply with `pong` is `terminate`-d.
 - `broadcast(path, payload)` — sends to all clients on that channel (JSON.stringify is automatic).
 - Maximum payload 1 MB (`WS_MAX_PAYLOAD`).
@@ -382,7 +390,8 @@ A `node-cron` wrapper with safeguards:
 - Unique task names; cron expression validation at registration.
 - Anti-overlap guard: if a task is still running when the next tick arrives, that tick is skipped and logged.
 - `stopAll({ waitMs })` — stops accepting new ticks and waits for in-flight tasks (for graceful shutdown).
-- `runOnInit: true` — run once at startup (via `setImmediate`).
+- `runOnInit: true` — run once when `startAll()` is called (after `listen`), not when `register()` is called.
+- `SCHEDULER_ENABLED=false` — no tasks start and `runOnInit` does not run.
 
 ### 6.6 Logger (`src/libs/logger.js`)
 
@@ -396,8 +405,8 @@ Running the application is not just `npm install && npm start`. There is a compo
 
 ```mermaid
 flowchart LR
-    A["extension-api/src"] -->|"npm run poc:copy"| B["base-api/src/extensions/<br/>(generated, gitignored)"]
-    C["package.base.json<br/>(source of truth)"] -->|"npm run merge:ext"| D["package.json<br/>(generated)"]
+    A["extension-api/src"] -->|"node scripts/copy-extensions.js"| B["base-api/src/extensions/<br/>(generated, gitignored)"]
+    C["package.base.json<br/>(source of truth)"] -->|"node scripts/merge-package.js"| D["package.json<br/>(generated, gitignored)"]
     B -->|extension package.json| D
     D -->|"npm install"| E["node_modules"]
     E --> F["npm start"]
@@ -406,11 +415,13 @@ flowchart LR
 The full sequence (all available in `run-poc.sh`):
 
 ```bash
-npm run poc:copy    # 1. copy extension-api/src → src/extensions/
-npm run merge:ext   # 2. generate package.json from package.base.json + extension
-npm install         # 3. install the combined dependencies
-npm start           # 4. run
+node scripts/copy-extensions.js   # 1. copy extension-api/src → src/extensions/
+node scripts/merge-package.js     # 2. generate package.json from package.base.json + extension
+npm install                       # 3. install the combined dependencies
+npm start                         # 4. run
 ```
+
+> `package.json` is generated and not tracked. On a fresh clone, use the two `node scripts/...` commands above (or `./run-poc.sh`) before `npm install`/`npm test`.
 
 The contract details — why `package.json` is gitignored, how version conflicts are handled, what `MERGE_STRATEGY` means — are in [CONTRACT.md §8](./CONTRACT.md#8-package-contract).
 
@@ -459,9 +470,9 @@ This document is honest about its limitations — don't let beginners assume eve
 | Limitation | Detail | Location |
 | --- | --- | --- |
 | Hardcoded auth | The `auth` middleware always sets the user `Catherine/admin`; no JWT/session verification yet | `extension-api/src/user-management/middleware.extend.js` |
-| In-memory rate limit | A Map with no periodic cleanup — it grows with the number of IPs | the same file |
+| In-memory rate limit | The Map is cleaned up periodically, but it is still per-process — not suitable for multi-instance deployments | the same file |
 | `API_KEY` not used yet | Present in config and `.env`, not checked anywhere | `src/libs/config.js` |
-| Fallback credentials in config | `config.pg` has hardcoded default host/user/password for POC convenience | `src/libs/config.js` |
+| Required env | `assertRequiredConfig()` refuses to start when `PG_HOST/PORT/USER/PASSWORD/DATABASE` is missing; there are no credential fallbacks | `src/libs/config.js` |
 | Build-time composition | Extensions are not runtime plugins; adding an extension means re-running `poc:copy` + restart | `scripts/copy-extensions.js` |
 | Fail-fast boot | A single extension error during `init` fails the entire application (`process.exit(1)`) | `index.js` |
 | WebSocket without auth | Upgrades are accepted for all registered paths | `src/libs/ws.js` |

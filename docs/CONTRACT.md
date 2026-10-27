@@ -72,6 +72,7 @@ src/modules/<module-name>/
 | Path route | Relatif terhadap prefix module. `"/"` = root prefix; `"/:id"` = parameter; `"/roles"` = static. |
 | Module system | ESM murni. Tidak ada `require`, `module.exports`, `__dirname`. |
 | Akses infrastruktur | Lewat `deps` param `init`, atau `import { db, logger } from "../../../libs/deps.js"` — dipakai **di dalam function**, bukan top-level. |
+| Validasi | `discover()` menolak `prefix` tanpa `/`, `init` non-function, dan route file yang tidak mengekspor default function. |
 
 ### ✅ Contoh benar
 
@@ -147,7 +148,7 @@ const uuid = require("uuid");
 | Aturan | Detail |
 | --- | --- |
 | Lokasi penulisan | Selalu di repo **extension-api**. `base-api/src/extensions/` adalah hasil copy (gitignored) — perubahan di sana akan hilang. |
-| Nama file route | `route.<group>.extend.js` — akhiran `.extend` inilah penandanya. |
+| Nama file route | Di root extension wajib `route.<group>.extend.js`; `discover()` menolak `route.<group>.js` di root. Extension-only module memakai subfolder `routes/route.<group>.js`. |
 | Import ke libs base | `../../libs/deps.js` (dari root folder module extension); dari subfolder `routes/` atau `services/` tambah satu level: `../../../libs/deps.js` |
 | Import ke kode module inti | `../../modules/<module>/services/<file>.js` — merujuk ke kode base, bukan menyalinnya |
 | Init hook extension | `init.extend.js` → `export default async function initXxx(deps) {}` |
@@ -231,38 +232,33 @@ GET /roles      ← route.role.js                      → tidak ada extension �
 | Tanpa opsi (default) | `overwrite` | Handler extension (base dibuang seluruhnya) |
 | `{ prepend: [...] }` | `prepend` | `prepend → middlewareBase → handlerBase` |
 | `{ mergeMiddleware: true }` | `merge` | `middlewareBase → middlewareExt → handler` |
+| `{ mergeMiddleware: true, keepBaseHandler: true }` | `merge+keep` | `middlewareBase → middlewareExt → handlerBase` |
 | `{ prepend: [...], mergeMiddleware: true }` | `prepend+merge` | `prepend → middlewareBase → middlewareExt → handler` |
 | Tidak ada pasangan base | `new` | Route extension apa adanya |
 
 Catatan:
 - "Handler" = elemen **terakhir** dari daftar handler; sisanya dianggap middleware.
 - `overwrite` membuang middleware base. Kalau middleware base masih dibutuhkan, gunakan `prepend` (jangan salin ulang kodenya).
+- `mergeMiddleware` tetap menganggap handler terakhir extension sebagai terminal. Jika extension hanya berisi middleware, gunakan `keepBaseHandler: true`; semua handler extension diperlakukan sebagai middleware dan handler base dipertahankan.
 
-### ⚠️ Aturan urutan (paling sering menyebabkan bug)
+### Aturan urutan route
 
-Express mencocokkan route **secara berurutan** dan berhenti di kecocokan pertama. Route final dirakit per grup, dan urutan grup mengikuti urutan file yang dibaca `discover()`. Karena itu:
+Express mencocokkan route **secara berurutan** dan berhenti di kecocokan pertama. Namun `mountModule` sekarang **mengurutkan route final secara deterministik** sebelum dipasang: static segment lebih dulu, lalu parameter, wildcard, dan method `all` paling akhir. Urutan file/group tidak menentukan hasil.
 
-1. **Route static harus dievaluasi sebelum route parameter** dengan segmen yang sama.
-   - `/users/roles` harus sebelum `/users/:id`, kalau tidak `GET /users/roles` akan cocok ke `/:id` dengan `id = "roles"` → 404 "User not found" yang membingungkan.
-2. **Cara paling aman:** taruh route static dan route parameter di file/group yang sama, static lebih dulu:
+1. **Route static selalu dievaluasi sebelum route parameter** dengan segmen yang sama. `/users/roles` tidak akan tertelan `/:id`.
+2. **Tetap tulis route static sebelum parameter** di file yang sama agar urutan deklarasi jelas dan mudah dibaca:
 
 ```js
-// route.user.js — urutan DIJAMIN oleh urutan kode
+// route.user.js — urutan deklarasi tetap jelas
 export default function registerUser(r) {
   r.get("/roles", listRolesHandler);   // ✅ static dulu
   r.get("/:id", getUserHandler);       // parameter belakangan
 }
 ```
 
-3. **Cara yang dipakai sample repo saat ini:** memang dua file berbeda (`route.role.js` untuk `/roles`, `route.user.js` untuk `/:id`). Ini bekerja karena urutan baca folder bersifat alfabetis pada praktiknya (`role` < `user`, `policy` < `product`), **tetapi urutan `fs.readdirSync` tidak dijamin kontrak OS**. Route table saat boot harus selalu diverifikasi, dan test sudah mengunci perilaku ini:
+3. **Test mengunci perilaku ini:** `test/routeOrder.test.js` menguji sorter secara unit dan menguji ulang dengan `fs.readdirSync` dibalik.
 
-```js
-// test/routes.test.js — kontrak urutan diuji di sini
-res = await fetch(`${base}/users/roles`);          // harus kena handler roles
-res = await fetch(`${base}/products/policies`);    // harus kena handler policies
-```
-
-> Aturan praktis: **saat menambah route static baru, cek route table saat boot.** Jika appear setelah route `/:id`, pindahkan ke group/file yang dievaluasi lebih dulu.
+> Aturan praktis: saat menambah route static baru, cek route table saat boot. Urutan final sudah disortir, tetapi route table tetap bukti yang paling mudah dibaca.
 
 4. **Duplikat `method + path` dalam satu group** → yang terakhir menang diam-diam. **Duplikat antar-group/file** → keduanya terpasang; Express memakai yang pertama cocok. Tidak ada error — karena itu tanggung jawab developer memastikan tidak ada duplikat tak sengaja.
 
@@ -388,6 +384,7 @@ populate({ db: myCustomDb });       // hanya test helper & index.js yang boleh
 | Payload keluar | Konvensi `{ type: "...", ... }`; welcome message memakai key `module`: `{ type: "welcome", module: "user-management" }` |
 | Broadcast | `ws.broadcast(path, payload)` → jumlah client terkirim; otomatis `JSON.stringify` |
 | Batas | Payload maksimal 1 MB (`WS_MAX_PAYLOAD`); client tanpa `pong` di-terminate otomatis |
+| Upgrade malformed | URL invalid → `400` dan socket ditutup; proses tetap hidup |
 | Error | Kesalahan di dalam handler async **tidak** ditangkap otomatis — tangani sendiri (try/catch) |
 
 ### ✅ Contoh benar
@@ -458,6 +455,8 @@ socket.on("message", async (raw) => {
 | JetStream consume | `await nats.consume(stream, durableName)` → `consumer.consume()`; ack (`m.ack()`) setelah sukses, `m.nak()` saat gagal |
 | Durable name | Unik per consumer: `user-management-worker`, `audit-user-worker` |
 | Decode pesan JetStream | `JSON.parse(nats.get().sc.decode(m.data))` |
+| JetStream opsional | Jika server NATS tidak mengaktifkan JetStream, aplikasi tetap boot; `jsPublish`/`consume` menjadi no-op/throw yang ditangani module |
+| Background retry | Hanya aktif bila `NATS_AUTO_RETRY_AFTER_EXHAUST=true`; `onConnected` dipanggil lagi setelah reconnect berhasil |
 | Larangan | Subscribe di top-level module; memanggil `nats.get()` tanpa cek ketersediaan |
 
 ### Pola wajib (reconnect-safe)
@@ -540,7 +539,7 @@ nc.publish("user.created", "{}");
 | Timezone | Default `UTC` (`SCHEDULER_TZ`); bisa di-override per task |
 | Handler | Harus async-safe; scheduler menangkap error dan mencatatnya (task gagal ≠ app crash) |
 | Overlap | Task yang masih berjalan saat tick berikutnya → tick di-skip (ada warning log) — desain task harus mendukung ini |
-| `runOnInit` | Jalankan sekali saat startup |
+| `runOnInit` | Jalankan sekali saat `startAll()` (setelah `listen`); tidak jalan bila scheduler disabled |
 | Shutdown | `stopAll({ waitMs })` menunggu task in-flight maksimal `waitMs` (default 10 dtk saat shutdown) — handler sebaiknya selesai jauh di bawah itu |
 
 ### ✅ Contoh benar
@@ -593,8 +592,8 @@ scheduler.register({ name: "x:heavy", schedule: "* * * * *", handler: heavyWork 
 | Aturan | Detail |
 | --- | --- |
 | Source of truth | `package.base.json` (base) dan `package.json` (extension). **Edit dan commit keduanya.** |
-| File generated | `package.json` (base, gitignored) dan `src/extensions/` — jangan edit manual |
-| Generate | `npm run merge:ext` (atau `--dry-run` untuk preview) |
+| File generated | `package.json` (base, **tidak di-track**, gitignored) dan `src/extensions/` — jangan edit manual |
+| Generate | `node scripts/merge-package.js` (atau `npm run merge:ext` setelah `package.json` ada) — `--dry-run` untuk preview |
 | Section yang digabung | `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`, `overrides`, `resolutions` |
 | Strategi konflik | `MERGE_STRATEGY=extension-wins` (default) \| `base-wins` \| `strict` |
 | Major mismatch | Dilaporkan dengan tanda ⚠️ — extension tetap menang, tapi base bisa rusak |
@@ -602,6 +601,8 @@ scheduler.register({ name: "x:heavy", schedule: "* * * * *", handler: heavyWork 
 | Scripts | Diambil dari base; extension tidak boleh mengubah `scripts` |
 
 Dependency tambahan dari extension (contoh `uuid`) otomatis masuk ke `package.json` hasil merge — inilah cara extension menambahkan library tanpa menyentuh repo base.
+
+> Pada clone baru, `package.json` belum ada. Jalankan `node scripts/copy-extensions.js` lalu `node scripts/merge-package.js` sebelum `npm install`/`npm test`.
 
 ### ✅ Alur benar
 
@@ -703,14 +704,15 @@ const pool = new pg.Pool({ host: "8.215.75.12", ... });
 | Kondisi | Response | Catatan |
 | --- | --- | --- |
 | Error tak tertangani di handler async | `500 { "error": "internal error" }` | Express 5 meneruskan rejection otomatis ke error middleware; detail + stack hanya masuk log |
-| Resource tidak ditemukan | `404 { "error": "<pesan>" }` | Ditangani di route (try/catch service), contoh `"User not found"` |
+| Resource tidak ditemukan | `404 { "error": "<pesan>" }` | Service melempar `NotFoundError`; route memetakan lewat `handleRouteError()`, contoh `"User not found"` |
 | Input tidak valid | `400 { "error": "<pesan>" }` | Contoh: `validateBody` middleware |
 | Tidak berhak | `403 { "error": "forbidden", "need": "<role>" }` | Dari `requireRole` |
 | Terlalu banyak request | `429 { "error": "too many requests" }` | Dari `rateLimit` |
 | Sukses | JSON body langsung | Tanpa envelope; array = array; object = object |
-| Health | `200/503 { ok, uptimeSec, checks }` | `ok = checks.pg && checks.nats` |
+| Health | `200/503 { ok, degraded, uptimeSec, checks }` | `ok = checks.pg && (checks.nats \|\| !NATS_REQUIRED)`; `degraded = !checks.nats` |
 
 Aturan tambahan:
+- Domain "tidak ditemukan" dilempar sebagai `NotFoundError` dan dipetakan oleh `handleRouteError()` menjadi 404. Error lain (DB, bug) dibiarkan naik ke error middleware → `500 { "error": "internal error" }`.
 - Jangan pernah mengirim `stack` atau pesan internal mentah ke client.
 - Selalu log dengan konteks: `logger.error("...", { reqId, error: err.message })`.
 - Jangan menelan error tanpa log (try/catch kosong).

@@ -72,6 +72,7 @@ src/modules/<module-name>/
 | Route path | Relative to the module prefix. `"/"` = prefix root; `"/:id"` = parameter; `"/roles"` = static. |
 | Module system | Pure ESM. No `require`, `module.exports`, `__dirname`. |
 | Infrastructure access | Via the `deps` param of `init`, or `import { db, logger } from "../../../libs/deps.js"` — used **inside a function**, not at top-level. |
+| Validation | `discover()` rejects a `prefix` without `/`, a non-function `init`, and route files that do not export a default function. |
 
 ### ✅ Correct example
 
@@ -147,7 +148,7 @@ const uuid = require("uuid");
 | Rule | Detail |
 | --- | --- |
 | Where to write | Always in the **extension-api** repo. `base-api/src/extensions/` is a copy result (gitignored) — changes there will be lost. |
-| Route file name | `route.<group>.extend.js` — the `.extend` suffix is the marker. |
+| Route file name | In the extension root it must be `route.<group>.extend.js`; `discover()` rejects `route.<group>.js` there. Extension-only modules use the `routes/route.<group>.js` subfolder. |
 | Importing base libs | `../../libs/deps.js` (from the extension module's root folder); from the `routes/` or `services/` subfolder add one level: `../../../libs/deps.js` |
 | Importing core module code | `../../modules/<module>/services/<file>.js` — reference the base code, do not copy it |
 | Extension init hook | `init.extend.js` → `export default async function initXxx(deps) {}` |
@@ -231,38 +232,33 @@ GET /roles      ← route.role.js                      → no extension → left
 | No options (default) | `overwrite` | Extension handler (base discarded entirely) |
 | `{ prepend: [...] }` | `prepend` | `prepend → middlewareBase → handlerBase` |
 | `{ mergeMiddleware: true }` | `merge` | `middlewareBase → middlewareExt → handler` |
+| `{ mergeMiddleware: true, keepBaseHandler: true }` | `merge+keep` | `middlewareBase → middlewareExt → handlerBase` |
 | `{ prepend: [...], mergeMiddleware: true }` | `prepend+merge` | `prepend → middlewareBase → middlewareExt → handler` |
 | No matching base | `new` | The extension route as-is |
 
 Notes:
 - "Handler" = the **last** element of the handler list; the rest are treated as middleware.
 - `overwrite` discards the base middleware. If the base middleware is still needed, use `prepend` (do not copy its code again).
+- `mergeMiddleware` still treats the extension's last handler as terminal. If the extension contains only middleware, use `keepBaseHandler: true`; all extension handlers are treated as middleware and the base handler is kept.
 
-### ⚠️ Ordering rule (the most common cause of bugs)
+### Route ordering rule
 
-Express matches routes **in order** and stops at the first match. The final routes are assembled per group, and group order follows the order of the files read by `discover()`. Therefore:
+Express matches routes **in order** and stops at the first match. However, `mountModule` now **sorts the final routes deterministically** before mounting: static segments first, then parameters, wildcards, and method `all` last. File/group read order no longer decides the result.
 
-1. **Static routes must be evaluated before parameter routes** with the same segment.
-   - `/users/roles` must come before `/users/:id`, otherwise `GET /users/roles` matches `/:id` with `id = "roles"` → a confusing 404 "User not found".
-2. **The safest way:** put the static route and the parameter route in the same file/group, static first:
+1. **Static routes are always evaluated before parameter routes** with the same segment. `/users/roles` will not be swallowed by `/:id`.
+2. **Still write static routes before parameter routes** in the same file so declaration order stays clear:
 
 ```js
-// route.user.js — order GUARANTEED by code order
+// route.user.js — declaration order stays clear
 export default function registerUser(r) {
   r.get("/roles", listRolesHandler);   // ✅ static first
   r.get("/:id", getUserHandler);       // parameter later
 }
 ```
 
-3. **The way the sample repo does it today:** they are indeed two separate files (`route.role.js` for `/roles`, `route.user.js` for `/:id`). This works because folder read order is alphabetical in practice (`role` < `user`, `policy` < `product`), **but `fs.readdirSync` order is not guaranteed by the OS contract**. The route table at boot must always be verified, and a test already locks in this behavior:
+3. **Tests lock this behavior:** `test/routeOrder.test.js` tests the sorter directly and re-tests with `fs.readdirSync` reversed.
 
-```js
-// test/routes.test.js — the ordering contract is tested here
-res = await fetch(`${base}/users/roles`);          // must hit the roles handler
-res = await fetch(`${base}/products/policies`);    // must hit the policies handler
-```
-
-> Rule of thumb: **when adding a new static route, check the route table at boot.** If it appears after the `/:id` route, move it to a group/file that is evaluated earlier.
+> Rule of thumb: when adding a new static route, check the route table at boot. The final order is sorted, but the route table is still the easiest evidence to read.
 
 4. **Duplicate `method + path` within one group** → the last one silently wins. **Duplicates across groups/files** → both are installed; Express uses the first match. There is no error — so it is the developer's responsibility to make sure there are no accidental duplicates.
 
@@ -388,6 +384,7 @@ populate({ db: myCustomDb });       // only test helpers & index.js may do this
 | Outgoing payload | Convention `{ type: "...", ... }`; the welcome message uses the `module` key: `{ type: "welcome", module: "user-management" }` |
 | Broadcast | `ws.broadcast(path, payload)` → the number of clients reached; `JSON.stringify` is applied automatically |
 | Limit | Maximum payload 1 MB (`WS_MAX_PAYLOAD`); clients that do not `pong` are terminated automatically |
+| Malformed upgrade | Invalid URL → `400` and the socket is closed; the process stays alive |
 | Errors | Mistakes inside an async handler are **not** caught automatically — handle them yourself (try/catch) |
 
 ### ✅ Correct example
@@ -458,6 +455,8 @@ socket.on("message", async (raw) => {
 | JetStream consume | `await nats.consume(stream, durableName)` → `consumer.consume()`; ack (`m.ack()`) on success, `m.nak()` on failure |
 | Durable name | Unique per consumer: `user-management-worker`, `audit-user-worker` |
 | Decoding JetStream messages | `JSON.parse(nats.get().sc.decode(m.data))` |
+| JetStream optional | If the NATS server does not enable JetStream, the app still boots; `jsPublish`/`consume` become no-ops/throws handled by the module |
+| Background retry | Only runs when `NATS_AUTO_RETRY_AFTER_EXHAUST=true`; `onConnected` is called again after a successful reconnect |
 | Prohibitions | Subscribing at module top-level; calling `nats.get()` without checking availability |
 
 ### Required pattern (reconnect-safe)
@@ -540,7 +539,7 @@ nc.publish("user.created", "{}");
 | Timezone | Default `UTC` (`SCHEDULER_TZ`); can be overridden per task |
 | Handler | Must be async-safe; the scheduler catches and logs errors (a failed task ≠ an app crash) |
 | Overlap | A task still running at the next tick → the tick is skipped (there is a warning log) — the task design must support this |
-| `runOnInit` | Run once at startup |
+| `runOnInit` | Run once during `startAll()` (after `listen`); does not run when the scheduler is disabled |
 | Shutdown | `stopAll({ waitMs })` waits for in-flight tasks for at most `waitMs` (default 10 s at shutdown) — handlers should finish well under that |
 
 ### ✅ Correct example
@@ -593,8 +592,8 @@ scheduler.register({ name: "x:heavy", schedule: "* * * * *", handler: heavyWork 
 | Rule | Detail |
 | --- | --- |
 | Source of truth | `package.base.json` (base) and `package.json` (extension). **Edit and commit both.** |
-| Generated files | `package.json` (base, gitignored) and `src/extensions/` — do not edit manually |
-| Generate | `npm run merge:ext` (or `--dry-run` to preview) |
+| Generated files | `package.json` (base, **not tracked**, gitignored) and `src/extensions/` — do not edit manually |
+| Generate | `node scripts/merge-package.js` (or `npm run merge:ext` once `package.json` exists) — `--dry-run` to preview |
 | Merged sections | `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`, `overrides`, `resolutions` |
 | Conflict strategy | `MERGE_STRATEGY=extension-wins` (default) \| `base-wins` \| `strict` |
 | Major mismatch | Reported with a ⚠️ mark — the extension still wins, but the base may break |
@@ -602,6 +601,8 @@ scheduler.register({ name: "x:heavy", schedule: "* * * * *", handler: heavyWork 
 | Scripts | Taken from the base; extensions must not change `scripts` |
 
 An additional dependency from the extension (for example `uuid`) automatically enters the merged `package.json` — this is how an extension adds a library without touching the base repo.
+
+> On a fresh clone, `package.json` does not exist yet. Run `node scripts/copy-extensions.js` then `node scripts/merge-package.js` before `npm install`/`npm test`.
 
 ### ✅ Correct flow
 
@@ -703,14 +704,15 @@ const pool = new pg.Pool({ host: "8.215.75.12", ... });
 | Condition | Response | Notes |
 | --- | --- | --- |
 | Unhandled error in an async handler | `500 { "error": "internal error" }` | Express 5 forwards rejections automatically to the error middleware; details + stack go to the log only |
-| Resource not found | `404 { "error": "<message>" }` | Handled in the route (service try/catch), example `"User not found"` |
+| Resource not found | `404 { "error": "<message>" }` | The service throws `NotFoundError`; the route maps it via `handleRouteError()`, example `"User not found"` |
 | Invalid input | `400 { "error": "<message>" }` | Example: the `validateBody` middleware |
 | Forbidden | `403 { "error": "forbidden", "need": "<role>" }` | From `requireRole` |
 | Too many requests | `429 { "error": "too many requests" }` | From `rateLimit` |
 | Success | A raw JSON body | No envelope; array = array; object = object |
-| Health | `200/503 { ok, uptimeSec, checks }` | `ok = checks.pg && checks.nats` |
+| Health | `200/503 { ok, degraded, uptimeSec, checks }` | `ok = checks.pg && (checks.nats \|\| !NATS_REQUIRED)`; `degraded = !checks.nats` |
 
 Additional rules:
+- A domain "not found" is thrown as `NotFoundError` and mapped by `handleRouteError()` to 404. Other errors (DB, bugs) bubble to the error middleware → `500 { "error": "internal error" }`.
 - Never send `stack` or raw internal messages to the client.
 - Always log with context: `logger.error("...", { reqId, error: err.message })`.
 - Never swallow an error without a log (an empty try/catch).

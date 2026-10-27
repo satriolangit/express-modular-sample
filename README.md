@@ -7,7 +7,7 @@ Aplikasi inti (*base*) dari arsitektur modular base + extension: satu aplikasi E
 - **Runtime:** Node.js ≥ 20.11 (disarankan 22), ESM (`"type": "module"`)
 - **HTTP:** Express 5
 - **Infra:** PostgreSQL (wajib), NATS + JetStream (opsional), WebSocket, node-cron
-- **Test:** `node:test` + fake deps — tanpa database (4/4 hijau)
+- **Test:** `node:test` + fake deps — tanpa database (40/40 hijau)
 - **Status:** POC / starter — lihat [batasan](docs/ARCHITECTURE.md#9-batasan-desain-saat-ini-poc)
 
 ## Quickstart (5 menit)
@@ -21,7 +21,7 @@ Aplikasi inti (*base*) dari arsitektur modular base + extension: satu aplikasi E
 # 1. Siapkan PostgreSQL (contoh via Docker) — aplikasi menolak start tanpa ini
 docker run --name pg-poc -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=arsi_system_db -p 5432:5432 -d postgres:16
 
-# 2. Sesuaikan .env (PG_HOST=localhost, PG_PASSWORD=pass, dst.)
+# 2. Salin .env.example → .env lalu sesuaikan (PG_HOST=localhost, PG_PASSWORD=pass, dst.)
 
 # 3. Bootstrap — package.json is generated and not tracked
 node scripts/copy-extensions.js   # salin extension → src/extensions/
@@ -75,3 +75,5 @@ test/                   # node:test + fake deps
 | `npm run poc:copy` | Salin extension ke `src/extensions/` |
 | `npm run merge:ext` | Generate `package.json` dari `package.base.json` + extension |
 | `npm run merge:ext:dry` | Preview merge tanpa menulis file |
+
+> Pada clone baru, jalankan `node scripts/copy-extensions.js` dan `node scripts/merge-package.js` dulu; perintah `npm run ...` tersedia setelah `package.json` dibuat.

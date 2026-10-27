@@ -74,6 +74,7 @@ express-modular-sample/
 ├── index.js                     # entry point: seluruh bootstrap
 ├── package.base.json            # source of truth dependencies & scripts
 ├── package.json                 # GENERATED — jangan edit manual
+├── .env.example                 # template env; salin ke .env
 ├── scripts/
 │   ├── merge-package.js         # gabung package.base.json + extension
 │   └── copy-extensions.js       # salin extension-api/src → src/extensions/
@@ -83,10 +84,13 @@ express-modular-sample/
 │   │   ├── logger.js            # Winston
 │   │   ├── deps.js              # kantong dependency (live bindings)
 │   │   ├── db.js                # PostgreSQL pool + query/tx/insert
+│   │   ├── errors.js            # domain errors + route error mapping
+│   │   ├── health.js            # readiness computation
 │   │   ├── nats.js              # NATS + JetStream + reconnection
 │   │   ├── ws.js                # WebSocket server + channel registry
 │   │   ├── scheduler.js         # cron tasks
 │   │   ├── routeCollector.js    # "router" palsu pengumpul definisi route
+│   │   ├── routeOrder.js        # sort route deterministik (static dulu)
 │   │   ├── mergeRoutes.js       # mesin merge base + extension
 │   │   ├── mountModule.js       # pasang hasil merge ke Express
 │   │   └── bootstrap/discover.js# scan folder → daftar module
@@ -166,15 +170,17 @@ sequenceDiagram
     IX->>APP: pasang /health + error middleware
     IX->>IX: setupShutdown() — SIGTERM/SIGINT handlers
     IX->>APP: httpServer.listen(config.http.port)
+    IX->>IX: scheduler.startAll() — after listen
 ```
 
 Poin penting yang sering ditanyakan pemula:
 
 1. **`import "dotenv/config"` harus dieksekusi lebih dulu** supaya `process.env` sudah terisi saat `config.js` dievaluasi. Itulah kenapa ia ditulis di baris pertama `index.js`.
-2. **NATS opsional, PostgreSQL wajib.** Kalau NATS tidak tersedia, aplikasi tetap jalan dalam *degraded mode* (fitur berbasis NATS mati, sisanya hidup). Kalau PostgreSQL tidak tersedia, aplikasi menolak start.
+2. **NATS opsional, PostgreSQL wajib.** Kalau NATS tidak tersedia, aplikasi tetap jalan dalam *degraded mode* (fitur berbasis NATS mati, sisanya hidup). JetStream juga opsional: bila server NATS hidup tetapi JetStream tidak aktif, aplikasi tetap boot tanpa fitur JetStream. Kalau PostgreSQL tidak tersedia, aplikasi menolak start.
 3. **`populate(deps)` terjadi SEBELUM `discover()`.** Module-module di-load secara dinamis oleh `discover()`; saat itu mereka membaca `deps`. Kegagalan urutan ini adalah penyebab error `Cannot read properties of null` yang klasik.
 4. **Urutan init module mengikuti nama folder (alfabetis)** — `audit-user` → `product-management` → `user-management`. Jangan mengandalkan urutan ini untuk saling ketergantungan antar module.
 5. **Routes dipasang paling akhir**, setelah semua init hook. Jadi kalaupun init hook melempar error, app langsung exit dan tidak pernah menerima trafik setengah jadi.
+6. **Scheduler baru dijalankan setelah `listen`**, sehingga task `runOnInit` tidak berjalan sebelum server siap menerima trafik.
 
 ---
 
@@ -223,7 +229,7 @@ Hasil akhirnya adalah `Map` berisi descriptor tiap module:
 
 ### 4.3 Merge Engine (`src/libs/mergeRoutes.js`)
 
-Base route dan extension route dicocokkan berdasarkan kunci `"<method> <path>"`. Empat mode merge:
+Base route dan extension route dicocokkan berdasarkan kunci `"<method> <path>"`. Mode merge:
 
 ```mermaid
 flowchart TD
@@ -241,26 +247,25 @@ Aturan yang perlu dipahami:
 - **Handler terakhir** dari sebuah definisi route dianggap sebagai *terminal handler* (yang mengirim response); sisanya dianggap *middleware*.
 - `prepend` menyisipkan middleware **sebelum** semua middleware base.
 - `mergeMiddleware: true` menyisipkan middleware extension **setelah** middleware base (tetap sebelum handler).
+- `keepBaseHandler: true` (dengan `mergeMiddleware`) memperlakukan semua handler extension sebagai middleware dan mempertahankan terminal base — mode `merge+keep`.
 - Tanpa opsi apapun → **overwrite**: handler extension menggantikan handler base sepenuhnya.
 - Route extension yang tidak punya pasangan di base → `_mode: "new"`.
 
 Contoh dari sample repo (lihat hasil cetak route table saat start):
 
 ```text
-Module: user-management  →  /users
-    [role]
-      GET     /users/roles
-    [user]
-      GET     /users
-      GET     /users/:id [overwrite]     ← route.user.extend.js menimpa GET /users/:id
-      DELETE  /users/:id [new]           ← route baru dari extension
+  Module: user-management  →  /users
+      [role] GET     /users/roles
+      [user] GET     /users
+      [user] GET     /users/:id [overwrite]     ← route.user.extend.js menimpa GET /users/:id
+      [user] DELETE  /users/:id [new]           ← route baru dari extension
 ```
 
 ### 4.4 Mount (`src/libs/mountModule.js`)
 
-Tahap terakhir: hasil merge dipasang ke satu `express.Router()` per module, lalu router itu di-`app.use(prefix, router)`. Setiap route yang terpasang dicetak ke console supaya developer bisa langsung melihat mode merge yang terjadi.
+Tahap terakhir: hasil merge dipasang ke satu `express.Router()` per module, lalu router itu di-`app.use(prefix, router)`. `mountModule` meratakan semua group lalu mengurutkan route berdasarkan spesifisitas: static segment lebih dulu, lalu parameter, wildcard, dan method `all` paling akhir. Dengan begitu urutan pembacaan file tidak lagi menentukan route mana yang menang. Setiap route yang terpasang dicetak ke console supaya developer bisa langsung melihat mode merge yang terjadi.
 
-> ⚠️ Karena Express mencocokkan route secara **berurutan** (first match), urutan route berpengaruh. Detail dan aturannya ada di [CONTRACT.md §3](./CONTRACT.md#3-route-merge-contract).
+> ⚠️ Karena Express mencocokkan route secara **berurutan** (first match), sorter ini penting untuk mencegah route static seperti `/roles` tertelan `/:id`. Detail dan aturannya ada di [CONTRACT.md §3](./CONTRACT.md#3-route-merge-contract).
 
 ---
 
@@ -305,7 +310,7 @@ Lapisan-lapisan aplikasi:
 | Service | Logika bisnis, aturan, orkestrasi | `service.user.js` |
 | Repository | Akses database (SQL) | `repo.user.js` |
 
-**Error handling:** Express 5 otomatis meneruskan error dari handler `async` ke error middleware global (tanpa `try/catch` pun tidak akan menggantung). Error middleware mencatat log dan mengirim `500 { "error": "internal error" }`. Route yang punya skenario "tidak ditemukan" tetap menangani sendiri dan mengembalikan `404 { "error": "User not found" }`.
+**Error handling:** Express 5 otomatis meneruskan error dari handler `async` ke error middleware global (tanpa `try/catch` pun tidak akan menggantung). Error middleware mencatat log dan mengirim `500 { "error": "internal error" }`. Route yang punya skenario "tidak ditemukan" melempar `NotFoundError` dan memetakannya lewat `handleRouteError()` menjadi `404 { "error": "User not found" }`; error DB tidak lagi diubah menjadi 404.
 
 ---
 
@@ -330,7 +335,7 @@ Aturan lengkapnya ada di [CONTRACT.md §4](./CONTRACT.md#4-deps-contract).
 
 - `getPool()` — membuat `pg.Pool` saat pertama dipanggil (lazy), dengan max connections, idle timeout, dan connection timeout dari config.
 - `query(sql, params)` — wrapper `pool.query` dengan logging durasi + rowCount, error di-rethrow setelah dicatat.
-- `tx(fn)` — transaksi: `BEGIN` → `fn(client)` → `COMMIT`, `ROLLBACK` jika error, `client.release()` selalu.
+- `tx(fn)` — transaksi: `BEGIN` → `fn(client)` → `COMMIT`, `ROLLBACK` jika error, `client.release()` selalu. Jika `ROLLBACK` sendiri gagal, error asli tetap dilempar dan kegagalan rollback dicatat.
 - `insert(table, row)` — helper insert dinamis: kolom diambil dari key object, value di-parameterisasi (`$1, $2, ...`), nama tabel/kolom divalidasi dengan regex identifier (mencegah SQL injection lewat nama kolom), dan mengembalikan baris hasil (`RETURNING *`).
 - `healthCheck()` — `SELECT 1`, dipakai saat bootstrap dan endpoint `/health`.
 
@@ -361,6 +366,8 @@ Callback yang disediakan:
 
 **Kenapa pola re-subscribe penting?** Setelah reconnect lewat background retry, subscription lama sudah mati bersama koneksi lama. Karena itu setiap module mendaftarkan fungsi `setup()` yang idempoten ke `onConnected` — pola lengkapnya di [CONTRACT.md §6](./CONTRACT.md#6-nats-contract) dan tutorial di [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md).
 
+**JetStream opsional.** Jika server NATS hidup tetapi JetStream tidak aktif, `initJetStream()` menangkap error, `js`/`jsm` menjadi `null`, dan aplikasi tetap boot dalam degraded mode. Background retry setelah koneksi hilang permanen hanya aktif bila `NATS_AUTO_RETRY_AFTER_EXHAUST=true` (default `false`).
+
 Publish dua mode:
 - `publish(subject, payload)` — core NATS, fire-and-forget, return `false` jika tidak tersedia.
 - `jsPublish(subject, payload)` — JetStream, dapat acknowledgment, return `null` jika gagal.
@@ -371,6 +378,7 @@ Satu `WebSocketServer` dengan `noServer: true`; routing dilakukan manual berdasa
 
 - `register(path, handler, { owner })` — daftarkan channel. **Throw jika path sudah terdaftar** (mencegah bentrok antar module).
 - Request upgrade ke path tak dikenal → `404` dan socket dihancurkan.
+- Request upgrade malformed (mis. URL invalid) → `400` dan socket dihancurkan; proses tetap hidup.
 - Heartbeat: setiap `WS_HEARTBEAT_MS` (default 30 dtk) server mengirim `ping`; client yang tidak membalas `pong` akan di-`terminate`.
 - `broadcast(path, payload)` — kirim ke semua client pada channel tersebut (JSON.stringify otomatis).
 - Maksimal payload 1 MB (`WS_MAX_PAYLOAD`).
@@ -382,7 +390,8 @@ Pembungkus `node-cron` dengan pengaman:
 - Nama task unik; validasi cron expression saat register.
 - Guard anti-overlap: jika task masih berjalan saat tick berikutnya tiba, tick tersebut di-skip dan dicatat.
 - `stopAll({ waitMs })` — berhenti menerima tick baru dan menunggu task yang sedang in-flight (untuk graceful shutdown).
-- `runOnInit: true` — jalankan sekali saat startup (via `setImmediate`).
+- `runOnInit: true` — jalankan sekali saat `startAll()` (setelah `listen`), bukan saat `register()`.
+- `SCHEDULER_ENABLED=false` — tidak ada task yang start dan `runOnInit` tidak dijalankan.
 
 ### 6.6 Logger (`src/libs/logger.js`)
 
@@ -396,8 +405,8 @@ Menjalankan aplikasi bukan sekadar `npm install && npm start`. Ada langkah kompo
 
 ```mermaid
 flowchart LR
-    A["extension-api/src"] -->|"npm run poc:copy"| B["base-api/src/extensions/<br/>(generated, gitignored)"]
-    C["package.base.json<br/>(source of truth)"] -->|"npm run merge:ext"| D["package.json<br/>(generated)"]
+    A["extension-api/src"] -->|"node scripts/copy-extensions.js"| B["base-api/src/extensions/<br/>(generated, gitignored)"]
+    C["package.base.json<br/>(source of truth)"] -->|"node scripts/merge-package.js"| D["package.json<br/>(generated, gitignored)"]
     B -->|package.json extension| D
     D -->|"npm install"| E["node_modules"]
     E --> F["npm start"]
@@ -406,11 +415,13 @@ flowchart LR
 Urutan lengkap (semua tersedia di `run-poc.sh`):
 
 ```bash
-npm run poc:copy    # 1. salin extension-api/src → src/extensions/
-npm run merge:ext   # 2. generate package.json dari package.base.json + extension
-npm install         # 3. install dependency gabungan
-npm start           # 4. jalankan
+node scripts/copy-extensions.js   # 1. salin extension-api/src → src/extensions/
+node scripts/merge-package.js     # 2. generate package.json dari package.base.json + extension
+npm install                       # 3. install dependency gabungan
+npm start                         # 4. jalankan
 ```
+
+> `package.json` adalah file generated dan tidak di-track. Pada clone baru, gunakan dua perintah `node scripts/...` di atas (atau `./run-poc.sh`) sebelum `npm install`/`npm test`.
 
 Detail kontraknya — kenapa `package.json` gitignored, bagaimana konflik versi ditangani, apa arti `MERGE_STRATEGY` — ada di [CONTRACT.md §8](./CONTRACT.md#8-package-contract).
 
@@ -459,9 +470,9 @@ Dokumen ini jujur soal keterbatasan — jangan sampai pemula mengira semua sudah
 | Batasan | Detail | Lokasi |
 | --- | --- | --- |
 | Auth hardcoded | Middleware `auth` selalu set user `Catherine/admin`; belum verifikasi JWT/session | `extension-api/src/user-management/middleware.extend.js` |
-| Rate limit in-memory | Map tanpa pembersihan berkala — tumbuh seiring jumlah IP | file yang sama |
+| Rate limit in-memory | Map dibersihkan berkala, tetapi tetap per-process — tidak cocok untuk multi-instance | file yang sama |
 | `API_KEY` belum dipakai | Ada di config dan `.env`, tidak dicek di manapun | `src/libs/config.js` |
-| Kredensial fallback di config | `config.pg` punya default host/user/password hardcoded untuk kemudahan POC | `src/libs/config.js` |
+| Env wajib | `assertRequiredConfig()` menolak start bila `PG_HOST/PORT/USER/PASSWORD/DATABASE` kosong; tidak ada fallback kredensial | `src/libs/config.js` |
 | Komposisi build-time | Extension bukan plugin runtime; menambah extension = jalankan ulang `poc:copy` + restart | `scripts/copy-extensions.js` |
 | Boot fail-fast | Satu extension error saat `init` menggagalkan seluruh aplikasi (`process.exit(1)`) | `index.js` |
 | WebSocket tanpa auth | Upgrade diterima untuk semua path terdaftar | `src/libs/ws.js` |
